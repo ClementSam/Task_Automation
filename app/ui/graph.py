@@ -428,6 +428,8 @@ class ResizerHandle(QtWidgets.QGraphicsRectItem):
 
     def itemChange(self, change, value):
         if change == QtWidgets.QGraphicsItem.ItemPositionChange:
+            if getattr(self.parent_comment, "_updating_handles", False):
+                return super().itemChange(change, value)
             pos = self.mapToParent(value)
             if SNAP_TO_GRID:
                 pos = QtCore.QPointF(round(pos.x()/GRID_SIZE)*GRID_SIZE, round(pos.y()/GRID_SIZE)*GRID_SIZE)
@@ -439,6 +441,7 @@ class CommentItem(QtWidgets.QGraphicsItemGroup):
     def __init__(self, rect: QtCore.QRectF, color: QtGui.QColor):
         super().__init__()
         self.rect = rect
+        self._updating_handles = False
         self.rect_item = QtWidgets.QGraphicsRectItem(rect, self)
         self.color = color
         brush = QtGui.QBrush(color); brush.setColor(QtGui.QColor(color.red(), color.green(), color.blue(), 60))
@@ -466,6 +469,8 @@ class CommentItem(QtWidgets.QGraphicsItemGroup):
         self.rect_item.setPen(QtGui.QPen(color, 2, QtCore.Qt.DashLine))
 
     def resize_from_handle(self, corner: str, new_pos_in_parent: QtCore.QPointF):
+        if self._updating_handles:
+            return
         r = QtCore.QRectF(self.rect)
         if corner == "tl": r.setTopLeft(new_pos_in_parent)
         elif corner == "tr": r.setTopRight(new_pos_in_parent)
@@ -480,11 +485,13 @@ class CommentItem(QtWidgets.QGraphicsItemGroup):
         self.rect = r; self.rect_item.setRect(r); self.label.setPos(r.topLeft() + QtCore.QPointF(8, 4)); self._update_handles()
 
     def _update_handles(self):
+        self._updating_handles = True
         r = self.rect_item.rect()
         self.h_tl.setPos(r.topLeft())
         self.h_tr.setPos(r.topRight())
         self.h_bl.setPos(r.bottomLeft())
         self.h_br.setPos(r.bottomRight())
+        self._updating_handles = False
 
     def itemChange(self, change, value):
         if change == QtWidgets.QGraphicsItem.ItemPositionChange and SNAP_TO_GRID:
