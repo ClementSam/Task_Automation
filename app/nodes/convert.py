@@ -4,6 +4,10 @@ from ..core.registry import registry
 
 @registry.register
 class IntToString(BaseNode):
+
+    @classmethod
+    def category(cls):
+        return "Conversion"
     @classmethod
     def inputs(cls):
         return {"value": int}
@@ -19,6 +23,10 @@ class IntToString(BaseNode):
 
 @registry.register
 class FloatToString(BaseNode):
+
+    @classmethod
+    def category(cls):
+        return "Conversion"
     @classmethod
     def inputs(cls):
         return {"value": float}
@@ -34,6 +42,10 @@ class FloatToString(BaseNode):
 
 @registry.register
 class BoolToString(BaseNode):
+
+    @classmethod
+    def category(cls):
+        return "Conversion"
     @classmethod
     def inputs(cls):
         return {"value": bool}

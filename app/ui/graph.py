@@ -293,13 +293,27 @@ class NodeItem(QtWidgets.QGraphicsObject):
         self.bg.setPen(QtGui.QPen(QtGui.QColor(80,80,100), 1))
 
         self.header = QtWidgets.QGraphicsRectItem(0, 0, NODE_W, HEADER_H, self)
+        # header color set later based on node type
         self.header.setBrush(QtGui.QBrush(QtGui.QColor(70,70,90)))
         self.header.setPen(QtGui.QPen(QtCore.Qt.NoPen))
 
-        title = registry.types()[type_name].title()
+        node_cls = registry.types()[type_name]
+        title = node_cls.title()
+        if getattr(node_cls, 'event_node', False):
+            self.header.setBrush(QtGui.QBrush(QtGui.QColor('#C0392B')))
         self.title_item = QtWidgets.QGraphicsSimpleTextItem(title, self)
+        # optional subtitle (e.g., variable name)
+        subtitle = self._params.get('subtitle') if isinstance(self._params, dict) else None
+        if subtitle:
+            self.subtitle_item = QtWidgets.QGraphicsSimpleTextItem(str(subtitle), self)
+            self.subtitle_item.setBrush(QtGui.QBrush(QtGui.QColor(200,200,210)))
+            f2 = self.subtitle_item.font(); f2.setPointSize(8); self.subtitle_item.setFont(f2)
+        else:
+            self.subtitle_item = None
         self.title_item.setBrush(QtGui.QBrush(QtGui.QColor(230,230,230)))
         self.title_item.setPos(8, 4)
+        if self.subtitle_item:
+            self.subtitle_item.setPos(8, 22)
 
         self.setFlags(
             QtWidgets.QGraphicsItem.ItemIsMovable |
@@ -377,6 +391,16 @@ class NodeItem(QtWidgets.QGraphicsObject):
             ed.setVisible(not wired)
         for name, ed in self.output_editors.items():
             ed.setVisible(True)
+        # Apply instance port type overrides
+        pt = self._params.get('_port_types') if isinstance(self._params, dict) else None
+        if pt:
+            for name, dtype in pt.items():
+                if name in self.outputs:
+                    self.outputs[name].dtype = dtype
+                    self.outputs[name]._update_appearance()
+                if name in self.inputs:
+                    self.inputs[name].dtype = dtype
+                    self.inputs[name]._update_appearance()
 
     def params(self) -> dict:
         return dict(self._params)
@@ -528,9 +552,9 @@ class GraphScene(QtWidgets.QGraphicsScene):
             if (e.src_port.parent_node.node_id == src_id and e.src_port.name == src_port and e.dst_port.parent_node.node_id == dst_id and e.dst_port.name == dst_port):
                 e.start_flow()
 
-    def add_node(self, type_name: str, pos: QtCore.QPointF) -> NodeItem:
+    def add_node(self, type_name: str, pos: QtCore.QPointF, params: dict=None) -> NodeItem:
         nid = _new_id()
-        item = NodeItem(nid, type_name)
+        item = NodeItem(nid, type_name, params=params)
         self.addItem(item)
         item.setPos(pos - QtCore.QPointF(NODE_W/2, NODE_H/2))
         self.nodes[nid] = item
@@ -642,6 +666,6 @@ class GraphView(QtWidgets.QGraphicsView):
         painter.setPen(pen_bold); painter.drawLines(lines_bold)
 
     def keyPressEvent(self, event):
-        if event.key() in (QtCore.Qt.Key_Delete, QtCore.Qt.Key_Backspace):
+        if event.key() in (QtCore.Qt.Key_Delete,):
             self.scene().delete_selected(); event.accept(); return
         super().keyPressEvent(event)

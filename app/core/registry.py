@@ -15,4 +15,27 @@ class NodeRegistry:
     def types(self) -> Dict[str, Type]:
         return dict(self._types)
 
+    def by_category(self):
+        """Return mapping {category: [cls,...]} sorted by category and title."""
+        from collections import defaultdict
+        buckets = defaultdict(list)
+        for cls in self._types.values():
+            cat = getattr(cls, 'CATEGORY', None)
+            if not cat and hasattr(cls, 'category'):
+                try:
+                    cat = cls.category()
+                except Exception:
+                    cat = None
+            if not cat:
+                mod = getattr(cls, '__module__', '')
+                key = mod.split('.')[-1].lower()
+                mapping = {'control': 'Contrôle', 'math': 'Math', 'convert': 'Conversion'}
+                cat = mapping.get(key, key.capitalize() or 'Divers')
+            buckets[cat].append(cls)
+        out = {}
+        for cat in sorted(buckets.keys(), key=lambda s: s.lower()):
+            items = sorted(buckets[cat], key=lambda c: getattr(c, 'title', lambda: c.__name__)())
+            out[cat] = items
+        return out
+
 registry = NodeRegistry()

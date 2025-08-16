@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Any, Tuple, DefaultDict, Optional
 from collections import defaultdict
 from .registry import registry
+from typing import Optional
 
 DEFAULT_PREFIX = "in_default:"
 
@@ -30,15 +31,24 @@ class ExecutionEngine:
         self.instances = {}
         self.results: Dict[str, Dict[str, Any]] = {}
         self.hooks = hooks
+        self._cancelled = False
+        self.vars: Dict[str, Any] = {}
 
         self.data_incoming: Dict[Tuple[str, str], Tuple[str, str]] = {}
         self.exec_outgoing: DefaultDict[Tuple[str, str], List[Tuple[str, str]]] = defaultdict(list)
         self.pure_nodes: List[str] = []
         self.exec_nodes: List[str] = []
 
+    def request_cancel(self):
+        self._cancelled = True
+
     def _classify(self):
         for nid, spec in self.nodes.items():
             self.instances[nid] = registry.create(spec.type_name, **spec.params)
+            try:
+                setattr(self.instances[nid], '_engine', self)
+            except Exception:
+                pass
 
         for e in self.edges:
             if e.kind == "data":
@@ -107,6 +117,8 @@ class ExecutionEngine:
         steps = 0; max_steps = 10000
 
         while queue:
+            if getattr(self, '_cancelled', False):
+                break
             steps += 1
             if steps > max_steps:
                 raise RuntimeError("Trop d'étapes d'exécution (possible boucle).")
@@ -121,9 +133,16 @@ class ExecutionEngine:
 
             next_ports, out = node.on_exec(**kwargs)
 
+            # notify outputs to hooks if available
+            if self.hooks and hasattr(self.hooks, "on_node_output"):
+                try: self.hooks.on_node_output(nid, out or {})
+                except Exception: pass
+
             if self.hooks and hasattr(self.hooks, "on_node_finish"):
                 try: self.hooks.on_node_finish(nid)
                 except Exception: pass
+
+
 
             prev = self.results.get(nid, {})
             prev.update(out or {})

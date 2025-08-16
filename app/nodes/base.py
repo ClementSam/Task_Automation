@@ -1,6 +1,7 @@
 from typing import Dict, Any, List, Tuple
 
 class BaseNode:
+    reentrant: bool = False
     def __init__(self, **params):
         self._params = params
 

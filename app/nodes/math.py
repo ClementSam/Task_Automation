@@ -4,6 +4,10 @@ from ..core.registry import registry
 
 @registry.register
 class ConstantNumber(BaseNode):
+
+    @classmethod
+    def category(cls):
+        return "Math"
     @classmethod
     def outputs(cls):
         return {"value": float}
@@ -22,6 +26,10 @@ class ConstantNumber(BaseNode):
 
 @registry.register
 class ConstantInt(BaseNode):
+
+    @classmethod
+    def category(cls):
+        return "Math"
     @classmethod
     def outputs(cls):
         return {"value": int}
@@ -40,6 +48,10 @@ class ConstantInt(BaseNode):
 
 @registry.register
 class ConstantBool(BaseNode):
+
+    @classmethod
+    def category(cls):
+        return "Math"
     @classmethod
     def outputs(cls):
         return {"value": bool}
@@ -54,6 +66,10 @@ class ConstantBool(BaseNode):
 
 @registry.register
 class Add(BaseNode):
+
+    @classmethod
+    def category(cls):
+        return "Math"
     @classmethod
     def inputs(cls):
         return {"a": float, "b": float}
@@ -69,6 +85,10 @@ class Add(BaseNode):
 
 @registry.register
 class Multiply(BaseNode):
+
+    @classmethod
+    def category(cls):
+        return "Math"
     @classmethod
     def inputs(cls):
         return {"a": float, "b": float}
