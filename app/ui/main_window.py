@@ -10,6 +10,8 @@ from ..nodes import control as control_nodes  # noqa: F401
 from ..nodes import convert as convert_nodes  # noqa: F401
 from ..nodes import variables_runtime as variable_nodes  # noqa: F401
 
+DTYPE_MAP = {'String': str, 'Int': int, 'Float': float, 'Bool': bool}
+
 class LegendWidget(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
@@ -49,9 +51,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.varsDock = QtWidgets.QDockWidget("Variables", self)
         self.varsDock.setWidget(self.varsPanel)
         self.addDockWidget(QtCore.Qt.LeftDockWidgetArea, self.varsDock)
-        # Create nodes from variables via context menu
+        # Create nodes from variables via panel
         self.varsPanel.addGetRequested.connect(self._spawn_get_variable)
         self.varsPanel.addSetRequested.connect(self._spawn_set_variable)
+        # react to variable edits
+        self.varsPanel.variableRenamed.connect(self._on_var_renamed)
+        self.varsPanel.variableTypeChanged.connect(self._on_var_type_changed)
+        self.varsPanel.variableRemoved.connect(self._on_var_removed)
+        self.varsPanel.variableAdded.connect(self._on_var_added)
+        self.var_defs = {}
 
         self.palette.itemDoubleClicked.connect(self._add_from_palette)
 
@@ -183,19 +191,71 @@ class MainWindow(QtWidgets.QMainWindow):
             text_lines.append("(aucune sortie 'Print')")
         self.log.appendPlainText("\n".join(text_lines))
 
+    # ----- variables sync -----
+    def _iter_var_nodes(self, name: str):
+        for item in self.scene.nodes.values():
+            if item.type_name in ("GetVariable", "SetVariable") and item._params.get("name") == name:
+                yield item
+
+    def _apply_variable_style(self, item: NodeItem, name: str, tname: str, dtype: type, error: bool = False):
+        item._params['name'] = name
+        item._params['type'] = tname
+        item._params['_port_types'] = {'value': dtype}
+        if item.subtitle_item:
+            item.subtitle_item.setText(name)
+        port = item.outputs.get('value') if item.type_name == "GetVariable" else item.inputs.get('value')
+        if port:
+            port.dtype = dtype
+            port._update_appearance()
+        if error:
+            brush = QtGui.QBrush(QtGui.QColor('#AA0000'), QtCore.Qt.DiagCrossPattern)
+            item._missing_var = True
+        else:
+            brush = QtGui.QBrush(TYPE_COLORS.get(dtype, TYPE_COLORS[object]))
+            item._missing_var = False
+        item.header.setBrush(brush)
+
+    def _on_var_added(self, name: str, tname: str):
+        self.var_defs[name] = tname
+        dtype = DTYPE_MAP.get(tname, str)
+        for item in self._iter_var_nodes(name):
+            # only relink nodes that were previously missing and of same type
+            if getattr(item, '_missing_var', False) and item._params.get('type') == tname:
+                self._apply_variable_style(item, name, tname, dtype, error=False)
+
+    def _on_var_removed(self, name: str, tname: str):
+        self.var_defs.pop(name, None)
+        dtype = DTYPE_MAP.get(tname, str)
+        for item in self._iter_var_nodes(name):
+            self._apply_variable_style(item, name, tname, dtype, error=True)
+
+    def _on_var_renamed(self, old: str, new: str, tname: str):
+        self.var_defs.pop(old, None)
+        self.var_defs[new] = tname
+        dtype = DTYPE_MAP.get(tname, str)
+        for item in self._iter_var_nodes(old):
+            self._apply_variable_style(item, new, tname, dtype, error=False)
+
+    def _on_var_type_changed(self, name: str, old_t: str, new_t: str):
+        self.var_defs[name] = new_t
+        dtype = DTYPE_MAP.get(new_t, str)
+        for item in self._iter_var_nodes(name):
+            # update type and color regardless of previous state
+            self._apply_variable_style(item, name, new_t, dtype, error=False)
+
     def _spawn_get_variable(self, name: str, tname: str):
-            pos = self.view.mapToScene(self.view.viewport().rect().center())
-            dtype_map = {'String': str, 'Int': int, 'Float': float, 'Bool': bool}
-            dtype = dtype_map.get(tname, str)
-            params = {'name': name, 'type': tname, '_port_types': {'value': dtype}, 'subtitle': name}
-            self.scene.add_node("GetVariable", pos, params=params)
+        pos = self.view.mapToScene(self.view.viewport().rect().center())
+        dtype = DTYPE_MAP.get(tname, str)
+        params = {'name': name, 'type': tname, '_port_types': {'value': dtype}, 'subtitle': name}
+        item = self.scene.add_node("GetVariable", pos, params=params)
+        item.header.setBrush(QtGui.QBrush(TYPE_COLORS[dtype]))
 
     def _spawn_set_variable(self, name: str, tname: str):
         pos = self.view.mapToScene(self.view.viewport().rect().center())
-        dtype_map = {'String': str, 'Int': int, 'Float': float, 'Bool': bool}
-        dtype = dtype_map.get(tname, str)
+        dtype = DTYPE_MAP.get(tname, str)
         params = {'name': name, 'type': tname, '_port_types': {'value': dtype}, 'subtitle': name}
-        self.scene.add_node("SetVariable", pos, params=params)
+        item = self.scene.add_node("SetVariable", pos, params=params)
+        item.header.setBrush(QtGui.QBrush(TYPE_COLORS[dtype]))
 
 
 
