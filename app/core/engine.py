@@ -62,39 +62,56 @@ class ExecutionEngine:
             else:
                 self.pure_nodes.append(nid)
 
-    def _build_data_graph(self, only_nodes: List[str]):
-        adj = {nid: [] for nid in only_nodes}
-        indeg = {nid: 0 for nid in only_nodes}
-        for (dst_id, dst_port), (src_id, src_port) in self.data_incoming.items():
-            if dst_id in indeg and src_id in indeg:
-                adj[src_id].append(dst_id)
-                indeg[dst_id] += 1
-        return adj, indeg
+    def _eval_node(self, nid: str, cache: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        """Évalue récursivement un noeud pour obtenir ses sorties.
 
-    def _topological_order_subset(self, subset: List[str]) -> List[str]:
-        adj, indeg = self._build_data_graph(subset)
-        q = [nid for nid in subset if indeg[nid] == 0]
-        order = []
-        while q:
-            nid = q.pop(0)
-            order.append(nid)
-            for nxt in adj[nid]:
-                indeg[nxt] -= 1
-                if indeg[nxt] == 0:
-                    q.append(nxt)
-        if len(order) != len(subset):
-            raise RuntimeError("Cycle détecté dans le sous-graphe de données (noeuds purs).")
-        return order
+        Les noeuds "purs" (sans ports d'exécution) sont recalculés à chaque
+        demande. Les noeuds avec ports d'exécution utilisent simplement la
+        dernière valeur disponible dans ``self.results``.
+        ``cache`` évite de recalculer plusieurs fois le même noeud pendant
+        l'évaluation d'un sous-graphe.
+        """
+        if nid in cache:
+            return cache[nid]
+
+        # Si le noeud possède des ports d'exécution, on ne le recalcule pas
+        # ici : sa valeur provient de la dernière exécution enregistrée.
+        if nid in self.exec_nodes:
+            res = self.results.get(nid, {})
+            cache[nid] = res
+            return res
+
+        node = self.instances[nid]
+        params = node.params()
+        kwargs = {}
+        for in_name in node.inputs().keys():
+            if (nid, in_name) in self.data_incoming:
+                src_id, src_port = self.data_incoming[(nid, in_name)]
+                src_res = self._eval_node(src_id, cache)
+                kwargs[in_name] = src_res.get(src_port, None)
+            else:
+                key = DEFAULT_PREFIX + in_name
+                kwargs[in_name] = params.get(key, None)
+
+        out = node.process(**kwargs) or {}
+        cache[nid] = out
+        # mémorise la dernière valeur calculée mais elle ne sera pas réutilisée
+        # pour un prochain calcul car ``_eval_node`` ignore ``self.results`` pour
+        # les noeuds purs.
+        self.results[nid] = out
+        return out
 
     def _gather_inputs(self, nid: str) -> Dict[str, Any]:
         node = self.instances[nid]
         params = node.params()
+        cache: Dict[str, Dict[str, Any]] = {}
         kwargs = {}
         for in_name in node.inputs().keys():
             # câble ?
             if (nid, in_name) in self.data_incoming:
                 src_id, src_port = self.data_incoming[(nid, in_name)]
-                kwargs[in_name] = self.results.get(src_id, {}).get(src_port, None)
+                src_res = self._eval_node(src_id, cache)
+                kwargs[in_name] = src_res.get(src_port, None)
             else:
                 # sinon valeur par défaut si présente
                 key = DEFAULT_PREFIX + in_name
@@ -103,14 +120,6 @@ class ExecutionEngine:
 
     def run(self) -> Dict[str, Dict[str, Any]]:
         self._classify()
-
-        if self.pure_nodes:
-            order = self._topological_order_subset(self.pure_nodes)
-            for nid in order:
-                node = self.instances[nid]
-                kwargs = self._gather_inputs(nid)
-                out = node.process(**kwargs) or {}
-                self.results[nid] = out
 
         entry_nodes = [nid for nid in self.exec_nodes if not self.instances[nid].exec_inputs()]
         queue: List[Tuple[str, Optional[str]]] = [(nid, None) for nid in entry_nodes]
