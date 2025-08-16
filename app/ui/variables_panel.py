@@ -75,10 +75,11 @@ class VariablesPanel(QtWidgets.QWidget):
         return out
 
     def _row_from_widget(self, w: QtWidgets.QWidget) -> int:
-        widget = w
-        if widget.parent() and widget.parent() is not self.table:
-            widget = widget.parent()  # cell widget container
-        return self.table.indexAt(widget.pos()).row()
+        """Return the row index for a widget placed in the table."""
+        # Map the widget's position to the table's viewport to reliably find
+        # the index, regardless of any intermediate container widgets
+        pos_in_viewport = w.mapTo(self.table.viewport(), QtCore.QPoint(0, 0))
+        return self.table.indexAt(pos_in_viewport).row()
 
     def _add_row(self, name: str = '', t: str = 'String', init: str = ''):
         r = self.table.rowCount()
