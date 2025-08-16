@@ -25,14 +25,14 @@ class ExecutionEngine:
     Sépare data graph (DAG) et exec graph (événements).
     Hooks pour visualisation (on_node_start/finish, on_edge_fired).
     """
-    def __init__(self, nodes: List[NodeSpec], edges: List[EdgeSpec], hooks: Optional[object] = None):
+    def __init__(self, nodes: List[NodeSpec], edges: List[EdgeSpec], hooks: Optional[object] = None, vars_init: Optional[Dict[str, Any]] = None):
         self.nodes = {n.id: n for n in nodes}
         self.edges = edges
         self.instances = {}
         self.results: Dict[str, Dict[str, Any]] = {}
         self.hooks = hooks
         self._cancelled = False
-        self.vars: Dict[str, Any] = {}
+        self.vars: Dict[str, Any] = dict(vars_init or {})
 
         self.data_incoming: Dict[Tuple[str, str], Tuple[str, str]] = {}
         self.exec_outgoing: DefaultDict[Tuple[str, str], List[Tuple[str, str]]] = defaultdict(list)

@@ -9,6 +9,7 @@ from ..nodes import math as math_nodes  # noqa: F401
 from ..nodes import control as control_nodes  # noqa: F401
 from ..nodes import convert as convert_nodes  # noqa: F401
 from ..nodes import variables_runtime as variable_nodes  # noqa: F401
+from ..nodes.variables_runtime import _cast as cast_var
 
 DTYPE_MAP = {'String': str, 'Int': int, 'Float': float, 'Bool': bool}
 
@@ -59,6 +60,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.varsPanel.variableTypeChanged.connect(self._on_var_type_changed)
         self.varsPanel.variableRemoved.connect(self._on_var_removed)
         self.varsPanel.variableAdded.connect(self._on_var_added)
+        self.varsPanel.variableInitChanged.connect(self._on_var_init_changed)
         self.var_defs = {}
 
         self.palette.itemDoubleClicked.connect(self._add_from_palette)
@@ -177,7 +179,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def run_graph(self):
         nodes, edges = self.scene.build_specs()
         try:
-            self.engine_runner.start(nodes, edges)
+            init_vars = {name: val for name, (t, val) in self.var_defs.items()}
+            self.engine_runner.start(nodes, edges, init_vars)
         except Exception as e:
             self.log.appendPlainText(f"[ERREUR] {e}")
     
@@ -207,6 +210,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if port:
             port.dtype = dtype
             port._update_appearance()
+        if item.type_name == "GetVariable":
+            ed = item.output_editors.pop('value', None)
+            if ed:
+                item.scene().removeItem(ed)
         if error:
             brush = QtGui.QBrush(QtGui.QColor('#AA0000'), QtCore.Qt.DiagCrossPattern)
             item._missing_var = True
@@ -215,8 +222,9 @@ class MainWindow(QtWidgets.QMainWindow):
             item._missing_var = False
         item.header.setBrush(brush)
 
-    def _on_var_added(self, name: str, tname: str):
-        self.var_defs[name] = tname
+    def _on_var_added(self, name: str, tname: str, init_val: str):
+        val = cast_var(init_val, tname)
+        self.var_defs[name] = (tname, val)
         dtype = DTYPE_MAP.get(tname, str)
         for item in self._iter_var_nodes(name):
             # only relink nodes that were previously missing and of same type
@@ -230,18 +238,38 @@ class MainWindow(QtWidgets.QMainWindow):
             self._apply_variable_style(item, name, tname, dtype, error=True)
 
     def _on_var_renamed(self, old: str, new: str, tname: str):
-        self.var_defs.pop(old, None)
-        self.var_defs[new] = tname
+        t, val = self.var_defs.pop(old, (tname, cast_var('', tname)))
+        self.var_defs[new] = (tname, val)
         dtype = DTYPE_MAP.get(tname, str)
         for item in self._iter_var_nodes(old):
             self._apply_variable_style(item, new, tname, dtype, error=False)
 
     def _on_var_type_changed(self, name: str, old_t: str, new_t: str):
-        self.var_defs[name] = new_t
+        val = self.var_defs.get(name, (old_t, cast_var('', old_t)))[1]
+        casted = cast_var(val, new_t)
+        self.var_defs[name] = (new_t, casted)
         dtype = DTYPE_MAP.get(new_t, str)
         for item in self._iter_var_nodes(name):
             # update type and color regardless of previous state
             self._apply_variable_style(item, name, new_t, dtype, error=False)
+            port = item.outputs.get('value') if item.type_name == "GetVariable" else item.inputs.get('value')
+            if port:
+                for e in list(port.edges):
+                    other = e.dst_port if e.src_port == port else e.src_port
+                    if other:
+                        other.remove_edge(e)
+                    for cp in list(e.control_points):
+                        self.scene.removeItem(cp)
+                    if e in self.scene.edges:
+                        self.scene.edges.remove(e)
+                    self.scene.removeItem(e)
+                    port.remove_edge(e)
+
+    def _on_var_init_changed(self, name: str, new_val: str):
+        if name not in self.var_defs:
+            return
+        tname, _ = self.var_defs[name]
+        self.var_defs[name] = (tname, cast_var(new_val, tname))
 
     def _spawn_get_variable(self, name: str, tname: str):
         pos = self.view.mapToScene(self.view.viewport().rect().center())
@@ -249,6 +277,9 @@ class MainWindow(QtWidgets.QMainWindow):
         params = {'name': name, 'type': tname, '_port_types': {'value': dtype}, 'subtitle': name}
         item = self.scene.add_node("GetVariable", pos, params=params)
         item.header.setBrush(QtGui.QBrush(TYPE_COLORS[dtype]))
+        ed = item.output_editors.pop('value', None)
+        if ed:
+            self.scene.removeItem(ed)
 
     def _spawn_set_variable(self, name: str, tname: str):
         pos = self.view.mapToScene(self.view.viewport().rect().center())
