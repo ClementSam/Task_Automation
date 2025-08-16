@@ -14,6 +14,7 @@ def _cast(val, tname: str):
 
 @registry.register
 class GetVariable(BaseNode):
+    HIDDEN = True
     @classmethod
     def title(cls): return "Get Variable"
     @classmethod
@@ -32,6 +33,7 @@ class GetVariable(BaseNode):
 
 @registry.register
 class SetVariable(BaseNode):
+    HIDDEN = True
     @classmethod
     def title(cls): return "Set Variable"
     @classmethod

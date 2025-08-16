@@ -20,6 +20,9 @@ class NodeRegistry:
         from collections import defaultdict
         buckets = defaultdict(list)
         for cls in self._types.values():
+            # allow nodes to opt-out from the palette (e.g. variable get/set)
+            if getattr(cls, 'HIDDEN', False):
+                continue
             cat = getattr(cls, 'CATEGORY', None)
             if not cat and hasattr(cls, 'category'):
                 try:
