@@ -1,44 +1,30 @@
-
 from PyQt5 import QtCore
-from .engine import ExecutionEngine
+
+from .scheduler import Scheduler
+
 
 class _HooksBridge:
-    def __init__(self, emitter): self._emitter = emitter
-    def on_node_start(self, nid: str): self._emitter.sigNodeStarted.emit(nid)
-    def on_node_finish(self, nid: str): self._emitter.sigNodeFinished.emit(nid)
+    """Forward scheduler callbacks to EngineRunner signals."""
+
+    def __init__(self, runner):
+        self._runner = runner
+
+    def on_node_start(self, nid: str):
+        self._runner.sigNodeStarted.emit(nid)
+
+    def on_node_finish(self, nid: str):
+        self._runner.sigNodeFinished.emit(nid)
+
     def on_edge_fired(self, src_id: str, src_port: str, dst_id: str, dst_port: str):
-        self._emitter.sigEdgeFired.emit(src_id, src_port, dst_id, dst_port)
-    def on_node_output(self, nid: str, out: dict): self._emitter.sigNodeOutput.emit(nid, out)
+        self._runner.sigEdgeFired.emit(src_id, src_port, dst_id, dst_port)
 
-class EngineWorker(QtCore.QObject):
-    sigRunStarted = QtCore.pyqtSignal()
-    sigRunFinished = QtCore.pyqtSignal(dict)
-    sigNodeStarted = QtCore.pyqtSignal(str)
-    sigNodeFinished = QtCore.pyqtSignal(str)
-    sigEdgeFired = QtCore.pyqtSignal(str, str, str, str)
-    sigNodeOutput = QtCore.pyqtSignal(str, dict)
-    sigError = QtCore.pyqtSignal(str)
+    def on_node_output(self, nid: str, out: dict):
+        self._runner.sigNodeOutput.emit(nid, out)
 
-    @QtCore.pyqtSlot(list, list, dict)
-    def start_run(self, nodes, edges, vars_init):
-        try:
-            self.sigRunStarted.emit()
-            hooks = _HooksBridge(self)
-            self._engine = ExecutionEngine(nodes, edges, hooks=hooks, vars_init=vars_init)
-            results = self._engine.run()
-            self.sigRunFinished.emit(results)
-            self._engine = None
-        except Exception as e:
-            self.sigError.emit(str(e))
-
-    def cancel(self):
-        try:
-            if hasattr(self, "_engine") and self._engine and hasattr(self._engine, "request_cancel"):
-                self._engine.request_cancel()
-        except Exception:
-            pass
 
 class EngineRunner(QtCore.QObject):
+    """Asynchronous engine powered by :class:`Scheduler` in the main thread."""
+
     sigRunStarted = QtCore.pyqtSignal()
     sigRunFinished = QtCore.pyqtSignal(dict)
     sigNodeStarted = QtCore.pyqtSignal(str)
@@ -49,29 +35,24 @@ class EngineRunner(QtCore.QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._thread = QtCore.QThread(self)
-        self._worker = EngineWorker()
-        self._worker.moveToThread(self._thread)
-        # bubble up
-        self._worker.sigRunStarted.connect(self.sigRunStarted)
-        self._worker.sigRunFinished.connect(self.sigRunFinished)
-        self._worker.sigNodeStarted.connect(self.sigNodeStarted)
-        self._worker.sigNodeFinished.connect(self.sigNodeFinished)
-        self._worker.sigEdgeFired.connect(self.sigEdgeFired)
-        self._worker.sigNodeOutput.connect(self.sigNodeOutput)
-        self._worker.sigError.connect(self.sigError)
-        self._thread.start()
+        self._scheduler: Scheduler | None = None
 
     def start(self, nodes, edges, vars_init=None):
-        QtCore.QMetaObject.invokeMethod(self._worker, "start_run", QtCore.Qt.QueuedConnection,
-                                        QtCore.Q_ARG(list, nodes), QtCore.Q_ARG(list, edges), QtCore.Q_ARG(dict, vars_init or {}))
+        try:
+            self.sigRunStarted.emit()
+            hooks = _HooksBridge(self)
+            self._scheduler = Scheduler(hooks=hooks)
+            self._scheduler.sigRunFinished.connect(self.sigRunFinished)
+            self._scheduler.setup(nodes, edges, vars_init or {})
+            QtCore.QTimer.singleShot(0, self._scheduler.start_run)
+        except Exception as e:  # pragma: no cover - forward error
+            self.sigError.emit(str(e))
 
     def stop(self):
-        self._worker.cancel()
+        if self._scheduler:
+            self._scheduler.cancel_all()
 
-    def deleteLater(self):
-        try:
-            self._thread.quit(); self._thread.wait(5000)
-        except Exception:
-            pass
+    def deleteLater(self):  # pragma: no cover - Qt cleanup
+        self._scheduler = None
         super().deleteLater()
+

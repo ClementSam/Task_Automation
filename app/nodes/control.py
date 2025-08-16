@@ -57,20 +57,21 @@ class Delay(BaseNode):
     def category(cls):
         return "Contrôle"
 
-    def on_exec(self, seconds=None, **_) -> Tuple[List[str], Dict[str, Any]]:
+    def start(self, token_id: int, seconds=None, **_):
+        from PyQt5 import QtCore
+
         try:
             secs = float(0.0 if seconds is None else seconds)
         except Exception:
             secs = 0.0
-        # Non-blocking-ish wait to keep UI responsive
-        try:
-            from PyQt5.QtCore import QCoreApplication
-            import time as _t
-            end = _t.monotonic() + max(0.0, secs)
-            while _t.monotonic() < end:
-                QCoreApplication.processEvents()
-                _t.sleep(0.01)
-        except Exception:
-            import time as _t
-            _t.sleep(max(0.0, secs))
-        return (["then"], {})
+
+        msecs = max(0, int(secs * 1000))
+        timer = QtCore.QTimer()
+        timer.setSingleShot(True)
+
+        def _done():
+            timer.deleteLater()
+            self._scheduler.on_node_finished(self._nid, token_id, ["then"], {})
+
+        timer.timeout.connect(_done)
+        timer.start(msecs)
