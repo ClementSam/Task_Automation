@@ -19,12 +19,12 @@ class EngineWorker(QtCore.QObject):
     sigNodeOutput = QtCore.pyqtSignal(str, dict)
     sigError = QtCore.pyqtSignal(str)
 
-    @QtCore.pyqtSlot(list, list)
-    def start_run(self, nodes, edges):
+    @QtCore.pyqtSlot(list, list, dict)
+    def start_run(self, nodes, edges, vars_init):
         try:
             self.sigRunStarted.emit()
             hooks = _HooksBridge(self)
-            self._engine = ExecutionEngine(nodes, edges, hooks=hooks)
+            self._engine = ExecutionEngine(nodes, edges, hooks=hooks, vars_init=vars_init)
             results = self._engine.run()
             self.sigRunFinished.emit(results)
             self._engine = None
@@ -62,9 +62,9 @@ class EngineRunner(QtCore.QObject):
         self._worker.sigError.connect(self.sigError)
         self._thread.start()
 
-    def start(self, nodes, edges):
+    def start(self, nodes, edges, vars_init=None):
         QtCore.QMetaObject.invokeMethod(self._worker, "start_run", QtCore.Qt.QueuedConnection,
-                                        QtCore.Q_ARG(list, nodes), QtCore.Q_ARG(list, edges))
+                                        QtCore.Q_ARG(list, nodes), QtCore.Q_ARG(list, edges), QtCore.Q_ARG(dict, vars_init or {}))
 
     def stop(self):
         self._worker.cancel()
