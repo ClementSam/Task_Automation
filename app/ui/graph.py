@@ -558,12 +558,19 @@ class GraphScene(QtWidgets.QGraphicsScene):
         nid = _new_id()
         item = NodeItem(nid, type_name, params=params)
         self.addItem(item)
-        item.setPos(pos - QtCore.QPointF(NODE_W/2, NODE_H/2))
+        top_left = pos - QtCore.QPointF(NODE_W/2, NODE_H/2)
+        x = round(top_left.x() / GRID_SIZE) * GRID_SIZE
+        y = round(top_left.y() / GRID_SIZE) * GRID_SIZE
+        item.setPos(QtCore.QPointF(x, y))
         self.nodes[nid] = item
         return item
 
     def add_comment(self, pos: QtCore.QPointF, color: QtGui.QColor = QtGui.QColor("#4CAF50")):
-        rect = QtCore.QRectF(pos.x(), pos.y(), 300, 200)
+        x = round(pos.x() / GRID_SIZE) * GRID_SIZE
+        y = round(pos.y() / GRID_SIZE) * GRID_SIZE
+        w = round(300 / GRID_SIZE) * GRID_SIZE
+        h = round(200 / GRID_SIZE) * GRID_SIZE
+        rect = QtCore.QRectF(x, y, max(GRID_SIZE, w), max(GRID_SIZE, h))
         c = CommentItem(rect, color)
         self.addItem(c); self.comments.append(c)
         return c
