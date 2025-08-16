@@ -43,7 +43,8 @@ class ControlPointItem(QtWidgets.QGraphicsEllipseItem):
             QtWidgets.QGraphicsItem.ItemIsSelectable |
             QtWidgets.QGraphicsItem.ItemSendsGeometryChanges
         )
-        self.setZValue(1)
+        # Ensure control points remain above edges and nodes
+        self.setZValue(2)
         self.setPos(pos)
 
     def itemChange(self, change, value):
@@ -219,7 +220,8 @@ class PortItem(QtWidgets.QGraphicsEllipseItem):
 class EdgeItem(QtWidgets.QGraphicsPathItem):
     def __init__(self, kind: str, src_port: PortItem, dst_port: PortItem = None):
         super().__init__()
-        self.setZValue(-1)
+        # Draw edges above nodes for better visibility
+        self.setZValue(1)
         self.kind = kind
         self.src_port = src_port
         self.dst_port = dst_port
