@@ -569,14 +569,25 @@ class GraphScene(QtWidgets.QGraphicsScene):
         return c
 
     def mousePressEvent(self, event):
-        item = self.itemAt(event.scenePos(), QtGui.QTransform())
+        # When edges are drawn above nodes they can intercept clicks intended
+        # for ports. Retrieve the item under the cursor but skip edges so
+        # that ports remain clickable even if covered by a path.
+        items = self.items(event.scenePos())
+        item = None
+        for it in items:
+            if not isinstance(it, (EdgeItem, ControlPointItem)):
+                item = it
+                break
+        if item is None and items:
+            item = items[0]
+
         if isinstance(item, PortItem):
             if item.is_output and event.button() == QtCore.Qt.LeftButton:
                 self._temp_src_port = item; self._temp_edge = EdgeItem(kind=item.kind, src_port=item); self.addItem(self._temp_edge); event.accept(); return
             elif (not item.is_output) and self._temp_edge is not None:
                 if self._temp_src_port is not None and item.parent_node != self._temp_src_port.parent_node:
                     if self._is_link_allowed(self._temp_src_port, item):
-                        e = self._finalize_edge(self._temp_src_port, item); 
+                        e = self._finalize_edge(self._temp_src_port, item);
                         if e: self.edges.append(e)
                 self._cancel_temp(); event.accept(); return
         super().mousePressEvent(event)
