@@ -23,7 +23,13 @@ EXEC_COLOR = QtGui.QColor("#FFFFFF")
 FLOW_COLOR = QtGui.QColor("#FF9A00")
 
 def is_compatible(src_t, dst_t) -> bool:
-    return src_t == dst_t
+    """Return True if two port types can be connected.
+
+    Besides strict equality, allow the generic ``object`` type to act as a
+    wildcard so that generic ports (e.g. variable nodes) can connect to any
+    specific data type.
+    """
+    return src_t == dst_t or src_t is object or dst_t is object
 
 PORT_RADIUS = 6
 EXEC_PORT_RADIUS = 7
@@ -301,8 +307,12 @@ class NodeItem(QtWidgets.QGraphicsObject):
 
         node_cls = registry.types()[type_name]
         title = node_cls.title()
+
+        color_attr = getattr(node_cls, 'COLOR', None) or getattr(node_cls, 'color', None)
         if getattr(node_cls, 'event_node', False):
             self.header.setBrush(QtGui.QBrush(QtGui.QColor('#C0392B')))
+        elif color_attr:
+            self.header.setBrush(QtGui.QBrush(QtGui.QColor(color_attr)))
         self.title_item = QtWidgets.QGraphicsSimpleTextItem(title, self)
         # optional subtitle (e.g., variable name)
         subtitle = self._params.get('subtitle') if isinstance(self._params, dict) else None
