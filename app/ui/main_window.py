@@ -183,12 +183,12 @@ class MainWindow(QtWidgets.QMainWindow):
             text_lines.append("(aucune sortie 'Print')")
         self.log.appendPlainText("\n".join(text_lines))
 
-def _spawn_get_variable(self, name: str, tname: str):
-        pos = self.view.mapToScene(self.view.viewport().rect().center())
-        dtype_map = {'String': str, 'Int': int, 'Float': float, 'Bool': bool}
-        dtype = dtype_map.get(tname, str)
-        params = {'name': name, 'type': tname, '_port_types': {'value': dtype}, 'subtitle': name}
-        self.scene.add_node("GetVariable", pos, params=params)
+    def _spawn_get_variable(self, name: str, tname: str):
+            pos = self.view.mapToScene(self.view.viewport().rect().center())
+            dtype_map = {'String': str, 'Int': int, 'Float': float, 'Bool': bool}
+            dtype = dtype_map.get(tname, str)
+            params = {'name': name, 'type': tname, '_port_types': {'value': dtype}, 'subtitle': name}
+            self.scene.add_node("GetVariable", pos, params=params)
 
     def _spawn_set_variable(self, name: str, tname: str):
         pos = self.view.mapToScene(self.view.viewport().rect().center())
