@@ -5,4 +5,4 @@ try:
     from . import serial  # noqa: F401
 except Exception:
     pass
-from . import variables_runtime  # noqa: F401
+from . import variables_runtime, constants  # noqa: F401
