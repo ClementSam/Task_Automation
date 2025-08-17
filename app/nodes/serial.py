@@ -70,6 +70,33 @@ class DisconnectPortCom(BaseNode):
 
 
 @registry.register
+class IsValid(BaseNode):
+    @classmethod
+    def title(cls):
+        return "Is Valid"
+
+    @classmethod
+    def type_name(cls):
+        return "IsValid"
+
+    @classmethod
+    def exec_inputs(cls) -> List[str]:
+        return ["in"]
+
+    @classmethod
+    def exec_outputs(cls) -> List[str]:
+        return ["valid", "invalid"]
+
+    @classmethod
+    def inputs(cls):
+        return {"handle": object}
+
+    def on_exec(self, handle=None, **_):
+        port = "valid" if handle else "invalid"
+        return ([port], {})
+
+
+@registry.register
 class SendPortComMessage(BaseNode):
     @classmethod
     def title(cls): return "Send Port Com Message"
