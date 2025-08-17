@@ -57,21 +57,26 @@ class Delay(BaseNode):
     def category(cls):
         return "Contrôle"
 
+    # Non-réentrant (hérité de BaseNode.reentrant=False)
     def start(self, token_id: int, seconds=None, **_):
         from PyQt5 import QtCore
 
+        # Parse seconds robustement (accepte "1,23")
         try:
-            secs = float(0.0 if seconds is None else seconds)
+            if seconds is None:
+                secs = 0.0
+            elif isinstance(seconds, str):
+                secs = float(seconds.replace(",", "."))
+            else:
+                secs = float(seconds)
         except Exception:
             secs = 0.0
 
         msecs = max(0, int(secs * 1000))
-        timer = QtCore.QTimer()
-        timer.setSingleShot(True)
 
-        def _done():
-            timer.deleteLater()
-            self._scheduler.on_node_finished(self._nid, token_id, ["then"], {})
+        # Timer sans lifetime à gérer → pas de GC aléatoire
+        QtCore.QTimer.singleShot(
+            msecs,
+            lambda tid=token_id: self._scheduler.on_node_finished(self._nid, tid, ["then"], {})
+        )
 
-        timer.timeout.connect(_done)
-        timer.start(msecs)
