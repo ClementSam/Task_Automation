@@ -1,5 +1,5 @@
 
-from . import base, control, convert, math
+from . import base, control, convert, math, text
 # optional: serial node
 try:
     from . import serial  # noqa: F401
