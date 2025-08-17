@@ -7,10 +7,16 @@ _TYPE_MAP = { 'String': str, 'Int': int, 'Float': float, 'Bool': bool }
 
 def _cast(val, tname: str):
     typ = _TYPE_MAP.get(tname, str)
-    if val is None: return typ() if typ is not str else ''
-    if typ is bool: return bool(val)
-    try: return typ(val)
-    except Exception: return val
+    if val is None:
+        return typ() if typ is not str else ''
+    if typ is bool:
+        if isinstance(val, str):
+            return val.strip().lower() in {"true", "1", "yes", "y", "on"}
+        return bool(val)
+    try:
+        return typ(val)
+    except Exception:
+        return val
 
 @registry.register
 class GetVariable(BaseNode):
