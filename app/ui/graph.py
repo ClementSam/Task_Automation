@@ -610,13 +610,28 @@ class GraphScene(QtWidgets.QGraphicsScene):
         super().mousePressEvent(event)
 
     def _is_link_allowed(self, src: PortItem, dst: PortItem) -> bool:
-        if src.kind != dst.kind: return False
-        if dst.is_output or src.is_output is False: return False
+        if src.kind != dst.kind:
+            return False
+        if dst.is_output or not src.is_output:
+            return False
+        if src.kind == "exec":
+            for e in list(src.edges):
+                self.removeItem(e)
+                src.remove_edge(e)
+                if e.dst_port:
+                    e.dst_port.remove_edge(e)
+                if e in self.edges:
+                    self.edges.remove(e)
+            return True
         for e in list(dst.edges):
-            self.removeItem(e); dst.remove_edge(e)
-            if e.src_port: e.src_port.remove_edge(e)
-            if e in self.edges: self.edges.remove(e)
-        if src.kind == "data": return is_compatible(src.dtype, dst.dtype)
+            self.removeItem(e)
+            dst.remove_edge(e)
+            if e.src_port:
+                e.src_port.remove_edge(e)
+            if e in self.edges:
+                self.edges.remove(e)
+        if src.kind == "data":
+            return is_compatible(src.dtype, dst.dtype)
         return True
 
     def mouseMoveEvent(self, event):
