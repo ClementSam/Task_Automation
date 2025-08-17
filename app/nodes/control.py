@@ -80,3 +80,36 @@ class Delay(BaseNode):
             lambda tid=token_id: self._scheduler.on_node_finished(self._nid, tid, ["then"], {})
         )
 
+
+@registry.register
+class Branch(BaseNode):
+    @classmethod
+    def exec_inputs(cls):
+        return ["in"]
+
+    @classmethod
+    def exec_outputs(cls):
+        return ["true", "false"]
+
+    @classmethod
+    def inputs(cls):
+        return {"condition": bool}
+
+    def on_exec(self, condition=False, **_):
+        port = "true" if bool(condition) else "false"
+        return ([port], {})
+
+
+@registry.register
+class Sequence(BaseNode):
+    @classmethod
+    def exec_inputs(cls):
+        return ["in"]
+
+    @classmethod
+    def exec_outputs(cls):
+        return ["then1", "then2"]
+
+    def on_exec(self, **_):
+        return (["then1", "then2"], {})
+
