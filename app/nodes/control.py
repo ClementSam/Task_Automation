@@ -36,6 +36,12 @@ class Print(BaseNode):
 
 @registry.register
 class Delay(BaseNode):
+    def __init__(self, **params):
+        super().__init__(**params)
+        self._timer = None
+        self._remaining_ms = 0
+        self._current_token = None
+
     @classmethod
     def title(cls):
         return "Delay"
@@ -72,13 +78,43 @@ class Delay(BaseNode):
         except Exception:
             secs = 0.0
 
-        msecs = max(0, int(secs * 1000))
+        self._current_token = token_id
+        self._remaining_ms = max(0, int(secs * 1000))
 
-        # Timer sans lifetime à gérer → pas de GC aléatoire
-        QtCore.QTimer.singleShot(
-            msecs,
-            lambda tid=token_id: self._scheduler.on_node_finished(self._nid, tid, ["then"], {})
-        )
+        if self._timer:
+            self._timer.stop()
+            self._timer.deleteLater()
+
+        self._timer = QtCore.QTimer()
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._on_timeout)
+        self._timer.start(self._remaining_ms)
+
+    def _on_timeout(self):
+        tid = self._current_token
+        self._current_token = None
+        if self._timer:
+            self._timer.deleteLater()
+            self._timer = None
+        if tid is not None:
+            self._scheduler.on_node_finished(self._nid, tid, ["then"], {})
+
+    def cancel(self) -> None:
+        if self._timer:
+            self._timer.stop()
+            self._timer.deleteLater()
+            self._timer = None
+        self._current_token = None
+        self._remaining_ms = 0
+
+    def pause(self) -> None:
+        if self._timer and self._timer.isActive():
+            self._remaining_ms = self._timer.remainingTime()
+            self._timer.stop()
+
+    def resume(self) -> None:
+        if self._timer and not self._timer.isActive() and self._current_token is not None:
+            self._timer.start(self._remaining_ms)
 
 
 @registry.register

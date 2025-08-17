@@ -37,6 +37,7 @@ class Scheduler(QtCore.QObject):
         self._active = 0
         self._pure_nodes: List[str] = []
         self._exec_nodes: List[str] = []
+        self._paused = False
 
     # ---- graph setup --------------------------------------------------
     def setup(self, nodes: List[NodeSpec], edges: List[EdgeSpec], vars_init: Dict[str, Any]):
@@ -51,6 +52,7 @@ class Scheduler(QtCore.QObject):
         self._exec_nodes.clear()
         self._next_token = 1
         self._active = 0
+        self._paused = False
 
         for spec in nodes:
             inst = registry.create(spec.type_name, **spec.params)
@@ -114,7 +116,8 @@ class Scheduler(QtCore.QObject):
 
     def post_ready(self, tid: int) -> None:
         self.ready.append(tid)
-        QtCore.QTimer.singleShot(0, self.drain)
+        if not self._paused:
+            QtCore.QTimer.singleShot(0, self.drain)
 
     # ---- running -------------------------------------------------------
     def start_run(self):
@@ -132,7 +135,7 @@ class Scheduler(QtCore.QObject):
             self.post_ready(tid)
 
     def drain(self):
-        if self._draining:
+        if self._draining or self._paused:
             return
         self._draining = True
         try:
@@ -213,4 +216,24 @@ class Scheduler(QtCore.QObject):
         self.tokens.clear()
         self.ready.clear()
         self._active = 0
+        self._paused = False
         QtCore.QTimer.singleShot(0, lambda: self.sigRunFinished.emit(dict(self.results)))
+
+    # pause/resume ------------------------------------------------------
+    def pause_all(self) -> None:
+        self._paused = True
+        for node in self.nodes.values():
+            try:
+                node.pause()
+            except Exception:
+                pass
+
+    def resume_all(self) -> None:
+        self._paused = False
+        for node in self.nodes.values():
+            try:
+                node.resume()
+            except Exception:
+                pass
+        if self.ready:
+            QtCore.QTimer.singleShot(0, self.drain)
