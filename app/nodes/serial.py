@@ -29,7 +29,8 @@ class ConnectPortCom(BaseNode):
     def inputs(cls): return {"port": str, "baud": int}
 
     @classmethod
-    def outputs(cls): return {"handle": object}
+    def outputs(cls):
+        return {"handle": object, "connected": bool}
 
     def on_exec(self, port=None, baud=None, **_):
         if not HAVE_SERIAL:
@@ -40,7 +41,7 @@ class ConnectPortCom(BaseNode):
         ser.setPortName(str(port))
         ser.setBaudRate(int(baud) or 115200)
         ok = ser.open(QSerialPort.ReadWrite)
-        return (["then"], {"handle": ser if ok else None})
+        return (["then"], {"handle": ser if ok else None, "connected": ok})
 
 
 @registry.register
