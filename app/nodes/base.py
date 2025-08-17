@@ -78,3 +78,10 @@ class BaseNode:
     # optional cancel hook for slow nodes
     def cancel(self) -> None:  # pragma: no cover - default noop
         pass
+
+    # optional pause/resume hooks for long-running nodes
+    def pause(self) -> None:  # pragma: no cover - default noop
+        pass
+
+    def resume(self) -> None:  # pragma: no cover - default noop
+        pass

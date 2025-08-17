@@ -52,6 +52,14 @@ class EngineRunner(QtCore.QObject):
         if self._scheduler:
             self._scheduler.cancel_all()
 
+    def pause(self):
+        if self._scheduler:
+            self._scheduler.pause_all()
+
+    def resume(self):
+        if self._scheduler:
+            self._scheduler.resume_all()
+
     def deleteLater(self):  # pragma: no cover - Qt cleanup
         self._scheduler = None
         super().deleteLater()

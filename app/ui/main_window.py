@@ -76,6 +76,8 @@ class MainWindow(QtWidgets.QMainWindow):
         tb = self.addToolBar("Main")
         runAct = tb.addAction("Run"); runAct.triggered.connect(self.run_graph)
         stopAct = tb.addAction("Stop"); stopAct.triggered.connect(self.stop_run)
+        pauseAct = tb.addAction("Pause"); pauseAct.setCheckable(True); pauseAct.triggered.connect(self.toggle_pause)
+        self.pauseAct = pauseAct
         clearAct = tb.addAction("Clear"); clearAct.triggered.connect(self.clear_graph)
         addCommentAct = tb.addAction("Commentaire"); addCommentAct.triggered.connect(self.add_comment_here)
 
@@ -180,11 +182,15 @@ class MainWindow(QtWidgets.QMainWindow):
         nodes, edges = self.scene.build_specs()
         try:
             init_vars = {name: val for name, (t, val) in self.var_defs.items()}
+            if hasattr(self, "pauseAct"):
+                self.pauseAct.setChecked(False)
             self.engine_runner.start(nodes, edges, init_vars)
         except Exception as e:
             self.log.appendPlainText(f"[ERREUR] {e}")
     
     def _on_engine_finished(self, results: dict):
+        if hasattr(self, "pauseAct"):
+            self.pauseAct.setChecked(False)
         # Affiche les impressions 'Print' à la fin d'un run async
         text_lines = []
         for nid, out in (results or {}).items():
@@ -302,5 +308,19 @@ class MainWindow(QtWidgets.QMainWindow):
             if hasattr(self, "engine_runner") and self.engine_runner is not None:
                 self.engine_runner.stop()
                 self.log.appendPlainText("[INFO] Arrêt demandé (Stop).")
+            if hasattr(self, "pauseAct"):
+                self.pauseAct.setChecked(False)
         except Exception as e:
             self.log.appendPlainText(f"[ERREUR] Stop: {e}")
+
+    def toggle_pause(self, checked):
+        try:
+            if hasattr(self, "engine_runner") and self.engine_runner is not None:
+                if checked:
+                    self.engine_runner.pause()
+                    self.log.appendPlainText("[INFO] Pause demandée.")
+                else:
+                    self.engine_runner.resume()
+                    self.log.appendPlainText("[INFO] Reprise.")
+        except Exception as e:
+            self.log.appendPlainText(f"[ERREUR] Pause: {e}")
