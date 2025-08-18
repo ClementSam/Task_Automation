@@ -30,7 +30,7 @@ class ConnectPortCom(BaseNode):
 
     @classmethod
     def outputs(cls):
-        return {"handle": object, "connected": bool}
+        return {"serial_port": QSerialPort, "connected": bool}
 
     def on_exec(self, port=None, baud=None, **_):
         if not HAVE_SERIAL:
@@ -41,7 +41,7 @@ class ConnectPortCom(BaseNode):
         ser.setPortName(str(port))
         ser.setBaudRate(int(baud) or 115200)
         ok = ser.open(QSerialPort.ReadWrite)
-        return (["then"], {"handle": ser if ok else None, "connected": ok})
+        return (["then"], {"serial_port": ser if ok else None, "connected": ok})
 
 
 @registry.register
@@ -59,12 +59,12 @@ class DisconnectPortCom(BaseNode):
     def exec_outputs(cls): return ["then"]
 
     @classmethod
-    def inputs(cls): return {"handle": object}
+    def inputs(cls): return {"serial_port": QSerialPort}
 
-    def on_exec(self, handle=None, **_):
-        if HAVE_SERIAL and isinstance(handle, QSerialPort):
+    def on_exec(self, serial_port=None, **_):
+        if HAVE_SERIAL and isinstance(serial_port, QSerialPort):
             try:
-                handle.close()
+                serial_port.close()
             except Exception:
                 pass
         return (["then"], {})
@@ -90,10 +90,10 @@ class IsValid(BaseNode):
 
     @classmethod
     def inputs(cls):
-        return {"handle": object}
+        return {"serial_port": QSerialPort}
 
-    def on_exec(self, handle=None, **_):
-        port = "valid" if handle else "invalid"
+    def on_exec(self, serial_port=None, **_):
+        port = "valid" if serial_port else "invalid"
         return ([port], {})
 
 
@@ -112,13 +112,13 @@ class SendPortComMessage(BaseNode):
     def exec_outputs(cls): return ["then"]
 
     @classmethod
-    def inputs(cls): return {"handle": object, "text": str}
+    def inputs(cls): return {"serial_port": QSerialPort, "text": str}
 
-    def on_exec(self, handle=None, text=None, **_):
-        if HAVE_SERIAL and isinstance(handle, QSerialPort) and handle.isOpen():
+    def on_exec(self, serial_port=None, text=None, **_):
+        if HAVE_SERIAL and isinstance(serial_port, QSerialPort) and serial_port.isOpen():
             data = (text or "").encode()
             try:
-                handle.write(data)
+                serial_port.write(data)
             except Exception:
                 pass
         return (["then"], {})
@@ -150,7 +150,7 @@ class OnPortComMessage(BaseNode, QtCore.QObject):
 
     @classmethod
     def inputs(cls):
-        return {"serial_port": object, "enabled": bool}
+        return {"serial_port": QSerialPort, "enabled": bool}
 
     @classmethod
     def outputs(cls):
@@ -165,8 +165,8 @@ class OnPortComMessage(BaseNode, QtCore.QObject):
         return ["exec_out_pass", "exec_on_message"]
 
     # ----- internal helpers -----
-    def _activate(self, handle: QSerialPort) -> None:
-        self._serial = handle
+    def _activate(self, serial_port: QSerialPort) -> None:
+        self._serial = serial_port
         self._buffer.clear()
         self._serial.readyRead.connect(self._on_ready)
         self._serial.errorOccurred.connect(self._on_error)
@@ -236,7 +236,7 @@ class OnPortComMessage(BaseNode, QtCore.QObject):
             sched.post_ready(child)
 
     # ----- execution entry -----
-    def start(self, token_id: int, serial_port=None, enabled=True, **_):
+    def start(self, token_id: int, serial_port: Optional[QSerialPort] = None, enabled=True, **_):
         QtCore.QTimer.singleShot(
             0,
             lambda tid=token_id: self._scheduler.on_node_finished(

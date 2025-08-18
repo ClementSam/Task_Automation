@@ -24,7 +24,7 @@ def test_connect_port_com_success(monkeypatch):
     node = ConnectPortCom()
     outs, data = node.on_exec(port="COM1", baud=9600)
     assert outs == ["then"]
-    assert isinstance(data["handle"], serial.QSerialPort)
+    assert isinstance(data["serial_port"], serial.QSerialPort)
     assert data["connected"] is True
 
 
@@ -35,5 +35,5 @@ def test_connect_port_com_failure(monkeypatch):
     node = ConnectPortCom()
     outs, data = node.on_exec(port="COM1", baud=9600)
     assert outs == ["then"]
-    assert data["handle"] is None
+    assert data["serial_port"] is None
     assert data["connected"] is False
