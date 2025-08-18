@@ -1,4 +1,7 @@
 from PyQt5 import QtWidgets, QtCore, QtGui
+from pathlib import Path
+from typing import Optional
+
 from .graph import GraphScene, GraphView, NodeItem, TYPE_COLORS, CommentItem
 from ..core.registry import registry
 from ..core.engine import ExecutionEngine
@@ -12,6 +15,27 @@ from ..nodes import variables_runtime as variable_nodes  # noqa: F401
 from ..nodes.variables_runtime import _cast as cast_var
 
 DTYPE_MAP = {'String': str, 'Int': int, 'Float': float, 'Bool': bool}
+
+
+class FileLogger(QtWidgets.QPlainTextEdit):
+    """Text logger that mirrors every line into a file."""
+
+    def __init__(self, path: Optional[Path] = None):
+        super().__init__()
+        self._path = path if path is not None else Path.cwd() / "app.log"
+        self._handle = self._path.open("a", encoding="utf-8")
+
+    def appendPlainText(self, text: str) -> None:  # type: ignore[override]
+        super().appendPlainText(text)
+        self._handle.write(text + "\n")
+        self._handle.flush()
+
+    def closeEvent(self, event):  # pragma: no cover - Qt behaviour
+        try:
+            self._handle.close()
+        finally:
+            super().closeEvent(event)
+
 
 class LegendWidget(QtWidgets.QWidget):
     def __init__(self):
@@ -69,7 +93,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.legendDock.setWidget(LegendWidget())
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, self.legendDock)
 
-        self.log = QtWidgets.QPlainTextEdit(); self.log.setReadOnly(True)
+        self.log = FileLogger(); self.log.setReadOnly(True)
         self.logDock = QtWidgets.QDockWidget("Log", self); self.logDock.setWidget(self.log)
         self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, self.logDock)
 
