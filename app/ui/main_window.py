@@ -1,6 +1,7 @@
 from PyQt5 import QtWidgets, QtCore, QtGui
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 
 from .graph import GraphScene, GraphView, NodeItem, TYPE_COLORS, CommentItem
 from ..core.registry import registry
@@ -22,7 +23,12 @@ class FileLogger(QtWidgets.QPlainTextEdit):
 
     def __init__(self, path: Optional[Path] = None):
         super().__init__()
-        self._path = path if path is not None else Path.cwd() / "app.log"
+        if path is None:
+            base_dir = Path(__file__).resolve().parent.parent
+            ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            self._path = base_dir / f"{ts}.log"
+        else:
+            self._path = path
         self._handle = self._path.open("a", encoding="utf-8")
 
     def appendPlainText(self, text: str) -> None:  # type: ignore[override]
@@ -93,7 +99,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.legendDock.setWidget(LegendWidget())
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, self.legendDock)
 
-        self.log = FileLogger(); self.log.setReadOnly(True)
+        self.log = FileLogger()
+        self.log.setReadOnly(True)
+        self.log.appendPlainText("Application started")
         self.logDock = QtWidgets.QDockWidget("Log", self); self.logDock.setWidget(self.log)
         self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, self.logDock)
 
