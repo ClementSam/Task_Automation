@@ -116,9 +116,16 @@ class SendPortComMessage(BaseNode):
 
     def on_exec(self, serial_port=None, text=None, **_):
         if HAVE_SERIAL and isinstance(serial_port, QSerialPort) and serial_port.isOpen():
-            data = (text or "").encode()
             try:
+                msg = text or ""
+                if not msg.endswith("\n"):
+                    msg += "\n"
+                data = msg.encode("utf-8")
                 serial_port.write(data)
+                try:
+                    serial_port.waitForBytesWritten(50)
+                except Exception:
+                    pass
             except Exception:
                 pass
         return (["then"], {})
