@@ -591,8 +591,8 @@ class GraphScene(QtWidgets.QGraphicsScene):
             if (e.src_port.parent_node.node_id == src_id and e.src_port.name == src_port and e.dst_port.parent_node.node_id == dst_id and e.dst_port.name == dst_port):
                 e.start_flow()
 
-    def add_node(self, type_name: str, pos: QtCore.QPointF, params: dict=None) -> NodeItem:
-        nid = _new_id()
+    def add_node(self, type_name: str, pos: QtCore.QPointF, params: dict=None, node_id: str=None) -> NodeItem:
+        nid = node_id or _new_id()
         item = NodeItem(nid, type_name, params=params)
         self.addItem(item)
         top_left = pos - QtCore.QPointF(NODE_W/2, NODE_H/2)
@@ -746,7 +746,7 @@ class GraphScene(QtWidgets.QGraphicsScene):
         node_ui = ui.get("nodes", {})
         for spec in nodes:
             pos = node_ui.get(spec.id, {}).get("pos", [0, 0])
-            item = self.add_node(spec.type_name, QtCore.QPointF(*pos), params=spec.params)
+            item = self.add_node(spec.type_name, QtCore.QPointF(*pos), params=spec.params, node_id=spec.id)
             item.setPos(QtCore.QPointF(*pos))
 
         for idx, spec in enumerate(edges):
