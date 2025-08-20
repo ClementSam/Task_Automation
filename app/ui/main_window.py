@@ -112,6 +112,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pauseAct = pauseAct
         clearAct = tb.addAction("Clear"); clearAct.triggered.connect(self.clear_graph)
         addCommentAct = tb.addAction("Commentaire"); addCommentAct.triggered.connect(self.add_comment_here)
+        tb.addSeparator()
+        self.actContinuous = tb.addAction("Exécution continue")
+        self.actContinuous.setCheckable(True)
+        self.actContinuous.setToolTip(
+            "Si activé : le graphe reste en attente (idle) et ne se termine pas automatiquement."
+        )
 
         # Context menu (right-click on view)
         self.view.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
@@ -120,6 +126,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # --- EngineRunner (background execution) ---
         self.engine_runner = EngineRunner(self)
         self._hooks = MainWindow.Hooks(self)
+        self.actContinuous.toggled.connect(lambda on: self.engine_runner.setContinuousRun(on))
         self.engine_runner.sigNodeStarted.connect(self._hooks.on_node_start)
         self.engine_runner.sigNodeFinished.connect(self._hooks.on_node_finish)
         self.engine_runner.sigEdgeFired.connect(self._hooks.on_edge_fired)

@@ -34,6 +34,18 @@ class EngineRunner(QtCore.QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._scheduler: Scheduler | None = None
+        self._continuous_desired = False
+
+    def setContinuousRun(self, enabled: bool):
+        """Remember and apply the desired continuous mode.
+
+        Can be called before or during execution. If the scheduler is
+        already running the mode is applied immediately; otherwise it is
+        stored and applied when :meth:`start` is invoked.
+        """
+        self._continuous_desired = bool(enabled)
+        if self._scheduler:
+            self._scheduler.set_continuous_run(self._continuous_desired)
 
     def start(self, nodes, edges, vars_init=None):
         try:
@@ -47,6 +59,8 @@ class EngineRunner(QtCore.QObject):
             self._scheduler.on_active_tokens_changed.connect(self.sigActiveTokens)
             self._scheduler.on_reset_node_visuals.connect(self.sigResetNodeVisuals)
             self._scheduler.on_node_listening_changed.connect(self.sigNodeListening)
+            # apply user choice before the run starts
+            self._scheduler.set_continuous_run(self._continuous_desired)
             self._scheduler.setup(nodes, edges, vars_init or {})
             QtCore.QTimer.singleShot(0, self._scheduler.start_run)
         except Exception as e:  # pragma: no cover - forward error
