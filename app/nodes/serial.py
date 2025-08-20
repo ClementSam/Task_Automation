@@ -93,6 +93,45 @@ class DisconnectPortCom(BaseNode):
 
 
 @registry.register
+class DisconnectPortComStringDebug(BaseNode):
+    @classmethod
+    def title(cls): return "Disconnect Port Com (Debug)"
+
+    @classmethod
+    def type_name(cls): return "DisconnectPortComStringDebug"
+
+    @classmethod
+    def exec_inputs(cls): return ["in"]
+
+    @classmethod
+    def exec_outputs(cls): return ["then"]
+
+    @classmethod
+    def inputs(cls): return {"port": str}
+
+    @classmethod
+    def outputs(cls): return {"disconnected": bool}
+
+    def on_exec(self, port=None, **_):
+        if not HAVE_SERIAL:
+            raise RuntimeError("QtSerialPort manquant (PyQt5.QtSerialPort).")
+        if port is None:
+            port = self._params.get("in_default:port", self._params.get("port"))
+        if port in (None, ""):
+            return (["then"], {"disconnected": False})
+        ser = QSerialPort()
+        ser.setPortName(str(port))
+        ok = False
+        try:
+            ok = ser.open(QSerialPort.ReadWrite)
+            if ok:
+                ser.close()
+        except Exception:
+            ok = False
+        return (["then"], {"disconnected": ok})
+
+
+@registry.register
 class IsValid(BaseNode):
     @classmethod
     def title(cls):
