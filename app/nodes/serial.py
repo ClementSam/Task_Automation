@@ -163,13 +163,14 @@ class OnPortComMessage(BaseNode, QtCore.QObject):
 
     reentrant: bool = False
     event_node: bool = True
+    is_event_source = True
 
     def __init__(self, **params):
         QtCore.QObject.__init__(self)
         BaseNode.__init__(self, **params)
         self._serial: Optional[QSerialPort] = None
         self._buffer = bytearray()
-        self._active = False  # phantom token state
+        self._listening = False
 
     @classmethod
     def title(cls):
@@ -195,21 +196,26 @@ class OnPortComMessage(BaseNode, QtCore.QObject):
     def exec_outputs(cls) -> List[str]:
         return ["exec_out_pass", "exec_on_message"]
 
-    # ----- internal helpers -----
-    def _activate(self, serial_port: QSerialPort) -> None:
+    def _open_port_if_needed(self, serial_port: QSerialPort) -> None:
         self._serial = serial_port
         self._buffer.clear()
-        self._serial.readyRead.connect(self._on_ready)
-        self._serial.errorOccurred.connect(self._on_error)
-        self._active = True
-        hooks = getattr(self._scheduler, "hooks", None)
-        if hooks and hasattr(hooks, "on_node_start"):
+
+    def _close_port_if_needed(self) -> None:
+        self._serial = None
+        self._buffer.clear()
+
+    def _subscribe_serial(self) -> None:
+        if self._serial:
             try:
-                hooks.on_node_start(self._nid)
+                self._serial.readyRead.connect(self._on_ready)
+            except Exception:
+                pass
+            try:
+                self._serial.errorOccurred.connect(self._on_error)
             except Exception:
                 pass
 
-    def _deactivate(self) -> None:
+    def _unsubscribe_serial(self) -> None:
         if self._serial:
             try:
                 self._serial.readyRead.disconnect(self._on_ready)
@@ -219,72 +225,71 @@ class OnPortComMessage(BaseNode, QtCore.QObject):
                 self._serial.errorOccurred.disconnect(self._on_error)
             except Exception:
                 pass
-        self._serial = None
-        self._buffer.clear()
-        if self._active:
-            hooks = getattr(self._scheduler, "hooks", None)
-            if hooks and hasattr(hooks, "on_node_finish"):
-                try:
-                    hooks.on_node_finish(self._nid)
-                except Exception:
-                    pass
-        self._active = False
 
-    # ----- serial callbacks -----
+    def _suspend_serial_listener(self, pause: bool) -> None:
+        if pause:
+            self._unsubscribe_serial()
+        else:
+            self._subscribe_serial()
+
+    def _ui_listening(self, on: bool) -> None:
+        if hasattr(self._engine, "ui_node_set_listening"):
+            self._engine.ui_node_set_listening(self._nid, on)
+
     def _on_ready(self):
-        if not (self._serial and self._active):
+        if not (self._serial and self._listening):
             return
         self._buffer.extend(self._serial.readAll().data())
         while b"\n" in self._buffer:
             line, _, rest = self._buffer.partition(b"\n")
             self._buffer = bytearray(rest)
             text = line.decode(errors="replace").rstrip("\r")
-            self._emit_message(text)
+            self._on_serial_msg(text)
 
     def _on_error(self, *_):
-        self._deactivate()
+        self._unsubscribe_serial()
 
-    def _emit_message(self, text: str) -> None:
+    def _on_serial_msg(self, payload: str):
         sched = self._scheduler
         if not sched:
             return
-        prev = sched.results.get(self._nid, {})
-        prev.update({"text": text})
-        sched.results[self._nid] = prev
-        hooks = getattr(sched, "hooks", None)
-        if hooks and hasattr(hooks, "on_node_output"):
-            try:
-                hooks.on_node_output(self._nid, {"text": text})
-            except Exception:
-                pass
-        for dst_id, dst_port in sched.exec_outgoing.get((self._nid, "exec_on_message"), []):
-            if hooks and hasattr(hooks, "on_edge_fired"):
-                try:
-                    hooks.on_edge_fired(self._nid, "exec_on_message", dst_id, dst_port)
-                except Exception:
-                    pass
-            child = sched._new_token(dst_id, {})
-            sched.post_ready(child)
+        child = sched._new_token(self._nid, {"message": payload})
+        sched.post_ready(child)
 
-    # ----- execution entry -----
-    def start(self, token_id: int, serial_port: Optional[QSerialPort] = None, enabled=None, **_):
+    def start(self, token_id: int = None, serial_port: Optional[QSerialPort] = None, enabled=None, message: str = None, **_):
+        if message is not None:
+            QtCore.QTimer.singleShot(
+                0,
+                lambda tid=token_id, msg=message: self._scheduler.on_node_finished(
+                    self._nid, tid, ["exec_on_message"], {"text": msg}
+                ),
+            )
+            return
+
         QtCore.QTimer.singleShot(
             0,
             lambda tid=token_id: self._scheduler.on_node_finished(
                 self._nid, tid, ["exec_out_pass"], {}
             ),
         )
-        if self._active:
-            self._deactivate()
 
-        if enabled is None:
-            enabled = self._params.get("in_default:enabled", self._params.get("enabled"))
-        if enabled is None:
-            return
+        self._listening = bool(enabled)
+        self._ui_listening(self._listening)
+        if self._listening and HAVE_SERIAL and isinstance(serial_port, QSerialPort) and serial_port.isOpen():
+            self._open_port_if_needed(serial_port)
+            self._subscribe_serial()
+        else:
+            self._unsubscribe_serial()
+            self._close_port_if_needed()
 
-        if enabled and HAVE_SERIAL and isinstance(serial_port, QSerialPort) and serial_port.isOpen():
-            self._activate(serial_port)
+    def pause(self):
+        self._suspend_serial_listener(True)
 
-    def cancel(self) -> None:  # pragma: no cover - defensive cleanup
-        self._deactivate()
+    def resume(self):
+        if self._listening:
+            self._suspend_serial_listener(False)
 
+    def cancel(self):  # pragma: no cover - defensive cleanup
+        self._ui_listening(False)
+        self._unsubscribe_serial()
+        self._close_port_if_needed()

@@ -9,12 +9,6 @@ class _HooksBridge:
     def __init__(self, runner):
         self._runner = runner
 
-    def on_node_start(self, nid: str):
-        self._runner.sigNodeStarted.emit(nid)
-
-    def on_node_finish(self, nid: str):
-        self._runner.sigNodeFinished.emit(nid)
-
     def on_edge_fired(self, src_id: str, src_port: str, dst_id: str, dst_port: str):
         self._runner.sigEdgeFired.emit(src_id, src_port, dst_id, dst_port)
 
@@ -31,6 +25,10 @@ class EngineRunner(QtCore.QObject):
     sigNodeFinished = QtCore.pyqtSignal(str)
     sigEdgeFired = QtCore.pyqtSignal(str, str, str, str)
     sigNodeOutput = QtCore.pyqtSignal(str, dict)
+    sigStateChanged = QtCore.pyqtSignal(str)
+    sigActiveTokens = QtCore.pyqtSignal(int)
+    sigResetNodeVisuals = QtCore.pyqtSignal()
+    sigNodeListening = QtCore.pyqtSignal(str, bool)
     sigError = QtCore.pyqtSignal(str)
 
     def __init__(self, parent=None):
@@ -43,6 +41,12 @@ class EngineRunner(QtCore.QObject):
             hooks = _HooksBridge(self)
             self._scheduler = Scheduler(hooks=hooks)
             self._scheduler.sigRunFinished.connect(self.sigRunFinished)
+            self._scheduler.on_token_started.connect(lambda nid, tid: self.sigNodeStarted.emit(nid))
+            self._scheduler.on_token_finished.connect(lambda nid, tid: self.sigNodeFinished.emit(nid))
+            self._scheduler.on_state_changed.connect(self.sigStateChanged)
+            self._scheduler.on_active_tokens_changed.connect(self.sigActiveTokens)
+            self._scheduler.on_reset_node_visuals.connect(self.sigResetNodeVisuals)
+            self._scheduler.on_node_listening_changed.connect(self.sigNodeListening)
             self._scheduler.setup(nodes, edges, vars_init or {})
             QtCore.QTimer.singleShot(0, self._scheduler.start_run)
         except Exception as e:  # pragma: no cover - forward error

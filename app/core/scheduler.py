@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Deque
 from collections import deque, defaultdict
 from PyQt5 import QtCore
 
@@ -21,11 +21,19 @@ class Scheduler(QtCore.QObject):
     """Single-threaded scheduler driving node execution."""
 
     sigRunFinished = QtCore.pyqtSignal(dict)
+    on_state_changed = QtCore.pyqtSignal(str)
+    on_active_tokens_changed = QtCore.pyqtSignal(int)
+    on_token_started = QtCore.pyqtSignal(str, int)
+    on_token_finished = QtCore.pyqtSignal(str, int)
+    on_reset_node_visuals = QtCore.pyqtSignal()
+    on_node_listening_changed = QtCore.pyqtSignal(str, bool)
 
     def __init__(self, parent=None, hooks: Optional[object] = None):
         super().__init__(parent)
         self.hooks = hooks
-        self.ready: deque[int] = deque()
+        self._continuous_run: bool = False
+        self._active_tokens: int = 0
+        self._ready: Deque[int] = deque()
         self.nodes: Dict[str, Any] = {}
         self.tokens: Dict[int, Token] = {}
         self.results: Dict[str, Dict[str, Any]] = {}
@@ -34,14 +42,21 @@ class Scheduler(QtCore.QObject):
         self.exec_outgoing: Dict[Tuple[str, str], List[Tuple[str, str]]] = defaultdict(list)
         self._next_token = 1
         self._draining = False
-        self._active = 0
         self._pure_nodes: List[str] = []
         self._exec_nodes: List[str] = []
         self._paused = False
 
+    # ---- configuration -------------------------------------------------
+    def set_continuous_run(self, enabled: bool) -> None:
+        self._continuous_run = bool(enabled)
+        self._emit_state()
+
+    def is_continuous_run(self) -> bool:
+        return self._continuous_run
+
     # ---- graph setup --------------------------------------------------
     def setup(self, nodes: List[NodeSpec], edges: List[EdgeSpec], vars_init: Dict[str, Any]):
-        self.ready.clear()
+        self._ready.clear()
         self.tokens.clear()
         self.results.clear()
         self.vars = dict(vars_init or {})
@@ -51,7 +66,7 @@ class Scheduler(QtCore.QObject):
         self._pure_nodes.clear()
         self._exec_nodes.clear()
         self._next_token = 1
-        self._active = 0
+        self._active_tokens = 0
         self._paused = False
 
         for spec in nodes:
@@ -106,16 +121,22 @@ class Scheduler(QtCore.QObject):
                 kwargs[in_name] = params.get(key, None)
         return kwargs
 
+    def ui_node_set_listening(self, nid: str, on: bool) -> None:
+        self.on_node_listening_changed.emit(nid, bool(on))
+
     # ---- token helpers -------------------------------------------------
     def _new_token(self, nid: str, data: Optional[Dict[str, Any]] = None) -> int:
         tid = self._next_token
         self._next_token += 1
         self.tokens[tid] = Token(tid, nid, data or {})
-        self._active += 1
+        self._inc_active(1)
         return tid
 
     def post_ready(self, tid: int) -> None:
-        self.ready.append(tid)
+        was_empty = not self._ready
+        self._ready.append(tid)
+        if was_empty:
+            self._emit_state("running")
         if not self._paused:
             QtCore.QTimer.singleShot(0, self.drain)
 
@@ -139,8 +160,8 @@ class Scheduler(QtCore.QObject):
             return
         self._draining = True
         try:
-            while self.ready:
-                tid = self.ready.popleft()
+            while self._ready:
+                tid = self._ready.popleft()
                 tok = self.tokens.get(tid)
                 if not tok or tok.cancelled:
                     continue
@@ -150,12 +171,14 @@ class Scheduler(QtCore.QObject):
                     node.enqueue_local(tid)
                     continue
                 node.busy = True
+                self.on_token_started.emit(nid, tid)
                 if self.hooks and hasattr(self.hooks, "on_node_start"):
                     try:
                         self.hooks.on_node_start(nid)
                     except Exception:
                         pass
                 kwargs = self._gather_inputs(nid)
+                kwargs.update(tok.data)
                 node.start(tid, **kwargs)
         finally:
             self._draining = False
@@ -165,7 +188,8 @@ class Scheduler(QtCore.QObject):
         node = self.nodes[nid]
         node.busy = False
         self.tokens.pop(tid, None)
-        self._active -= 1
+        self._inc_active(-1)
+        self.on_token_finished.emit(nid, tid)
         prev = self.results.get(nid, {})
         prev.update(out or {})
         self.results[nid] = prev
@@ -183,12 +207,14 @@ class Scheduler(QtCore.QObject):
         nxt = node.dequeue_local()
         if nxt is not None:
             node.busy = True
+            self.on_token_started.emit(nid, nxt)
             if self.hooks and hasattr(self.hooks, "on_node_start"):
                 try:
                     self.hooks.on_node_start(nid)
                 except Exception:
                     pass
             kwargs = self._gather_inputs(nid)
+            kwargs.update(self.tokens[nxt].data)
             node.start(nxt, **kwargs)
         # propagate exec edges
         for port in next_ports or []:
@@ -200,9 +226,7 @@ class Scheduler(QtCore.QObject):
                         pass
                 child = self._new_token(dst_id, {})
                 self.post_ready(child)
-        # run finished?
-        if self._active == 0 and not self.ready:
-            QtCore.QTimer.singleShot(0, lambda: self.sigRunFinished.emit(dict(self.results)))
+        self._maybe_finish()
 
     # cancellation -------------------------------------------------------
     def cancel_all(self) -> None:
@@ -214,9 +238,12 @@ class Scheduler(QtCore.QObject):
             except Exception:
                 pass
         self.tokens.clear()
-        self.ready.clear()
-        self._active = 0
+        self._ready.clear()
+        self._active_tokens = 0
         self._paused = False
+        self.on_state_changed.emit("stopped")
+        self.on_active_tokens_changed.emit(0)
+        self.on_reset_node_visuals.emit()
         QtCore.QTimer.singleShot(0, lambda: self.sigRunFinished.emit(dict(self.results)))
 
     # pause/resume ------------------------------------------------------
@@ -227,6 +254,7 @@ class Scheduler(QtCore.QObject):
                 node.pause()
             except Exception:
                 pass
+        self._emit_state("paused")
 
     def resume_all(self) -> None:
         self._paused = False
@@ -235,5 +263,37 @@ class Scheduler(QtCore.QObject):
                 node.resume()
             except Exception:
                 pass
-        if self.ready:
+        if self._ready:
             QtCore.QTimer.singleShot(0, self.drain)
+        self._emit_state()
+
+    # ---- helpers -------------------------------------------------------
+    def _inc_active(self, delta: int = 1) -> None:
+        self._active_tokens += delta
+        self.on_active_tokens_changed.emit(self._active_tokens)
+        if self._active_tokens > 0:
+            self._emit_state("running")
+
+    def _emit_state(self, forced: Optional[str] = None) -> None:
+        if forced:
+            self.on_state_changed.emit(forced)
+            return
+        if self._paused:
+            self.on_state_changed.emit("paused")
+        elif self._active_tokens > 0:
+            self.on_state_changed.emit("running")
+        elif self._continuous_run:
+            self.on_state_changed.emit("idle")
+        else:
+            self.on_state_changed.emit("stopped")
+
+    def _emit_run_finished(self) -> None:
+        QtCore.QTimer.singleShot(0, lambda: self.sigRunFinished.emit(dict(self.results)))
+
+    def _maybe_finish(self) -> None:
+        if self._active_tokens == 0 and not self._ready:
+            if not self._continuous_run:
+                self._emit_run_finished()
+                self._emit_state("stopped")
+            else:
+                self._emit_state("idle")

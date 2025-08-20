@@ -157,3 +157,21 @@ class Sequence(BaseNode):
     def on_exec(self, **_):
         return (["then1", "then2"], {})
 
+
+@registry.register
+class StopExecution(BaseNode):
+    """Arrête l'exécution en cours (équivaut au bouton Stop)."""
+
+    @classmethod
+    def exec_inputs(cls):
+        return ["in"]
+
+    @classmethod
+    def exec_outputs(cls):
+        return []
+
+    def on_exec(self, **_):
+        if getattr(self, "_scheduler", None):
+            self._scheduler.cancel_all()
+        return ([], {})
+
