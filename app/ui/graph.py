@@ -293,7 +293,8 @@ class NodeItem(QtWidgets.QGraphicsObject):
         self.node_id = node_id
         self.type_name = type_name
         self._params = params or {}
-        self.active = False
+        self._active = False
+        self._listening = False
 
         # child visuals
         self.bg = QtWidgets.QGraphicsRectItem(0, 0, NODE_W, NODE_H, self)
@@ -417,9 +418,26 @@ class NodeItem(QtWidgets.QGraphicsObject):
     def params(self) -> dict:
         return dict(self._params)
 
-    def setActive(self, flag: bool):
-        self.active = flag
-        pen = QtGui.QPen(QtGui.QColor("#FF9A00") if flag else QtGui.QColor(80,80,100), 2 if flag else 1)
+    def ui_set_active(self, on: bool):
+        self._active = bool(on)
+        self.updateOutline()
+
+    def ui_set_listening(self, on: bool):
+        self._listening = bool(on)
+        self.updateOutline()
+
+    def ui_clear_all(self):
+        self._active = False
+        self._listening = False
+        self.updateOutline()
+
+    def updateOutline(self):
+        if self._active:
+            pen = QtGui.QPen(QtGui.QColor("red"), 3)
+        elif self._listening:
+            pen = QtGui.QPen(QtGui.QColor("teal"), 2, QtCore.Qt.DashLine)
+        else:
+            pen = QtGui.QPen(QtGui.QColor(80,80,100), 1)
         self.bg.setPen(pen)
 
     def itemChange(self, change, value):
@@ -556,7 +574,16 @@ class GraphScene(QtWidgets.QGraphicsScene):
 
     def set_node_active(self, nid: str, flag: bool):
         node = self.nodes.get(nid)
-        if node: node.setActive(flag)
+        if node: node.ui_set_active(flag)
+
+    def set_node_listening(self, nid: str, flag: bool):
+        node = self.nodes.get(nid)
+        if node:
+            node.ui_set_listening(flag)
+
+    def ui_clear_all_nodes(self):
+        for item in self.nodes.values():
+            item.ui_clear_all()
 
     def mark_exec_edge(self, src_id: str, src_port: str, dst_id: str, dst_port: str):
         for e in self.edges:
@@ -691,6 +718,15 @@ class GraphView(QtWidgets.QGraphicsView):
         self.setDragMode(QtWidgets.QGraphicsView.RubberBandDrag)
         self.setViewportUpdateMode(QtWidgets.QGraphicsView.FullViewportUpdate)
         self.setTransformationAnchor(QtWidgets.QGraphicsView.AnchorUnderMouse)
+
+    def set_graph_border(self, state: str):
+        color = {
+            "running": "red",
+            "idle": "orange",
+            "paused": "gold",
+            "stopped": "#444",
+        }.get(state, "#444")
+        self.setStyleSheet(f"QGraphicsView {{ border: 4px solid {color}; border-radius: 6px; }}")
 
     def wheelEvent(self, event):
         self.scale(1.25 if event.angleDelta().y() > 0 else 0.8, 1.25 if event.angleDelta().y() > 0 else 0.8)
