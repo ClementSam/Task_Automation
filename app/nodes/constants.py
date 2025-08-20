@@ -1,6 +1,7 @@
 from typing import Dict, Any
 from .base import BaseNode
 from ..core.registry import registry
+from .utils import parse_bool_strict
 
 
 @registry.register
@@ -21,12 +22,13 @@ class ConstInt(BaseNode):
         return {"value": int}
 
     def process(self, **kwargs) -> Dict[str, Any]:
-        val = self._params.get("value", 0)
+        raw = self._params.get("value", None)
+        if raw in (None, ""):
+            return {"value": None}
         try:
-            val = int(val)
+            return {"value": int(raw)}
         except Exception:
-            val = 0
-        return {"value": val}
+            return {"value": None}
 
 
 @registry.register
@@ -47,12 +49,13 @@ class ConstFloat(BaseNode):
         return {"value": float}
 
     def process(self, **kwargs) -> Dict[str, Any]:
-        val = self._params.get("value", 0.0)
+        raw = self._params.get("value", None)
+        if raw in (None, ""):
+            return {"value": None}
         try:
-            val = float(val)
+            return {"value": float(raw)}
         except Exception:
-            val = 0.0
-        return {"value": val}
+            return {"value": None}
 
 
 @registry.register
@@ -73,7 +76,8 @@ class ConstBool(BaseNode):
         return {"value": bool}
 
     def process(self, **kwargs) -> Dict[str, Any]:
-        return {"value": bool(self._params.get("value", False))}
+        b = parse_bool_strict(self._params.get("value", None))
+        return {"value": b}
 
 
 @registry.register
@@ -94,4 +98,10 @@ class ConstString(BaseNode):
         return {"value": str}
 
     def process(self, **kwargs) -> Dict[str, Any]:
-        return {"value": str(self._params.get("value", ""))}
+        raw = self._params.get("value", None)
+        if raw in (None, ""):
+            return {"value": None}
+        try:
+            return {"value": str(raw)}
+        except Exception:
+            return {"value": None}

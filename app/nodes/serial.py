@@ -9,6 +9,7 @@ except Exception:
 
 from .base import BaseNode
 from ..core.registry import registry
+from .utils import parse_bool_strict
 
 
 @registry.register
@@ -36,18 +37,32 @@ class ConnectPortCom(BaseNode):
     def on_exec(self, port=None, baud=None, dtr=None, **_):
         if not HAVE_SERIAL:
             raise RuntimeError("QtSerialPort manquant (PyQt5.QtSerialPort).")
-        port = port or self._params.get("port") or "COM3"
-        baud = baud or self._params.get("baud") or 115200
-        dtr = dtr if dtr is not None else self._params.get("dtr", True)
+
+        if port is None:
+            port = self._params.get("in_default:port", self._params.get("port"))
+        if baud is None:
+            baud = self._params.get("in_default:baud", self._params.get("baud"))
+        if dtr is None:
+            dtr = self._params.get("in_default:dtr", self._params.get("dtr"))
+
+        if port in (None, "") or baud in (None, ""):
+            return (["then"], {"serial_port": None, "connected": False})
+
         ser = QSerialPort()
         ser.setPortName(str(port))
-        ser.setBaudRate(int(baud) or 115200)
+        try:
+            ser.setBaudRate(int(baud))
+        except Exception:
+            return (["then"], {"serial_port": None, "connected": False})
+
         ok = ser.open(QSerialPort.ReadWrite)
-        if ok and dtr is not None:
-            try:
-                ser.setDataTerminalReady(bool(dtr))
-            except Exception:
-                pass
+        if ok:
+            b = parse_bool_strict(dtr)
+            if b is not None:
+                try:
+                    ser.setDataTerminalReady(b)
+                except Exception:
+                    pass
         return (["then"], {"serial_port": ser if ok else None, "connected": ok})
 
 
@@ -123,8 +138,12 @@ class SendPortComMessage(BaseNode):
 
     def on_exec(self, serial_port=None, text=None, **_):
         if HAVE_SERIAL and isinstance(serial_port, QSerialPort) and serial_port.isOpen():
+            msg = text
+            if msg is None:
+                msg = self._params.get("in_default:text", self._params.get("text"))
+            if msg in (None, ""):
+                return (["then"], {})
             try:
-                msg = text or ""
                 if not msg.endswith("\n"):
                     msg += "\n"
                 data = msg.encode("utf-8")
@@ -146,8 +165,6 @@ class OnPortComMessage(BaseNode, QtCore.QObject):
     event_node: bool = True
 
     def __init__(self, **params):
-        # default state for enabled input is True
-        params.setdefault("in_default:enabled", True)
         QtCore.QObject.__init__(self)
         BaseNode.__init__(self, **params)
         self._serial: Optional[QSerialPort] = None
@@ -250,7 +267,7 @@ class OnPortComMessage(BaseNode, QtCore.QObject):
             sched.post_ready(child)
 
     # ----- execution entry -----
-    def start(self, token_id: int, serial_port: Optional[QSerialPort] = None, enabled=True, **_):
+    def start(self, token_id: int, serial_port: Optional[QSerialPort] = None, enabled=None, **_):
         QtCore.QTimer.singleShot(
             0,
             lambda tid=token_id: self._scheduler.on_node_finished(
@@ -259,6 +276,12 @@ class OnPortComMessage(BaseNode, QtCore.QObject):
         )
         if self._active:
             self._deactivate()
+
+        if enabled is None:
+            enabled = self._params.get("in_default:enabled", self._params.get("enabled"))
+        if enabled is None:
+            return
+
         if enabled and HAVE_SERIAL and isinstance(serial_port, QSerialPort) and serial_port.isOpen():
             self._activate(serial_port)
 

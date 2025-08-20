@@ -1,6 +1,7 @@
 from typing import Dict, Any
 from .base import BaseNode
 from ..core.registry import registry
+from .utils import parse_bool_strict
 
 @registry.register
 class IntToString(BaseNode):
@@ -15,11 +16,12 @@ class IntToString(BaseNode):
     def outputs(cls):
         return {"text": str}
     def process(self, value=None, **_) -> Dict[str, Any]:
+        if value is None:
+            return {"text": None}
         try:
-            v = int(0 if value is None else value)
+            return {"text": str(int(value))}
         except Exception:
-            v = 0
-        return {"text": str(v)}
+            return {"text": None}
 
 @registry.register
 class FloatToString(BaseNode):
@@ -34,11 +36,12 @@ class FloatToString(BaseNode):
     def outputs(cls):
         return {"text": str}
     def process(self, value=None, **_) -> Dict[str, Any]:
+        if value is None:
+            return {"text": None}
         try:
-            v = float(0.0 if value is None else value)
+            return {"text": str(float(value))}
         except Exception:
-            v = 0.0
-        return {"text": str(v)}
+            return {"text": None}
 
 @registry.register
 class BoolToString(BaseNode):
@@ -53,4 +56,7 @@ class BoolToString(BaseNode):
     def outputs(cls):
         return {"text": str}
     def process(self, value=None, **_) -> Dict[str, Any]:
-        return {"text": "True" if bool(value) else "False"}
+        b = parse_bool_strict(value)
+        if b is None:
+            return {"text": None}
+        return {"text": "True" if b else "False"}

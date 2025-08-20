@@ -17,9 +17,9 @@ class IsEgalText(BaseNode):
         return {"equal": bool}
 
     def process(self, a=None, b=None, **_) -> Dict[str, Any]:
-        a = "" if a is None else str(a)
-        b = "" if b is None else str(b)
-        return {"equal": a == b}
+        if a is None or b is None:
+            return {"equal": None}
+        return {"equal": str(a) == str(b)}
 
 @registry.register
 class AppendText(BaseNode):
@@ -36,6 +36,6 @@ class AppendText(BaseNode):
         return {"text": str}
 
     def process(self, a=None, b=None, **_) -> Dict[str, Any]:
-        a = "" if a is None else str(a)
-        b = "" if b is None else str(b)
-        return {"text": a + b}
+        if a is None or b is None:
+            return {"text": None}
+        return {"text": str(a) + str(b)}

@@ -1,6 +1,7 @@
 from typing import Dict, Any, List, Tuple
 from .base import BaseNode
 from ..core.registry import registry
+from .utils import parse_bool_strict
 
 @registry.register
 class BeginPlay(BaseNode):
@@ -67,16 +68,21 @@ class Delay(BaseNode):
     def start(self, token_id: int, seconds=None, **_):
         from PyQt5 import QtCore
 
-        # Parse seconds robustement (accepte "1,23")
+        # valeur déjà fournie (câble) ou via in_default par le moteur
+        if seconds is None:
+            QtCore.QTimer.singleShot(
+                0,
+                lambda tid=token_id: self._scheduler.on_node_finished(self._nid, tid, ["then"], {}),
+            )
+            return
         try:
-            if seconds is None:
-                secs = 0.0
-            elif isinstance(seconds, str):
-                secs = float(seconds.replace(",", "."))
-            else:
-                secs = float(seconds)
+            secs = float(str(seconds).replace(",", "."))
         except Exception:
-            secs = 0.0
+            QtCore.QTimer.singleShot(
+                0,
+                lambda tid=token_id: self._scheduler.on_node_finished(self._nid, tid, ["then"], {}),
+            )
+            return
 
         self._current_token = token_id
         self._remaining_ms = max(0, int(secs * 1000))
@@ -131,9 +137,11 @@ class Branch(BaseNode):
     def inputs(cls):
         return {"condition": bool}
 
-    def on_exec(self, condition=False, **_):
-        port = "true" if bool(condition) else "false"
-        return ([port], {})
+    def on_exec(self, condition=None, **_):
+        b = parse_bool_strict(condition)
+        if b is None:
+            return ([], {})
+        return (["true"] if b else ["false"], {})
 
 
 @registry.register
