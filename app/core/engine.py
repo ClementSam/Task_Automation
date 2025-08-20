@@ -101,16 +101,57 @@ class ExecutionEngine:
                 kwargs[in_name] = params.get(key, None)
         return kwargs
 
+    # Helpers for live evaluation of pure upstream nodes
+    def _collect_upstream_pure(self, nid: str) -> List[str]:
+        """Return list of upstream pure node ids for ``nid``."""
+        pure = set(self.pure_nodes)
+        seen = set()
+        result = set()
+        stack: List[str] = [nid]
+        incoming = self.data_incoming
+        while stack:
+            dst = stack.pop()
+            for (d_id, d_port), (s_id, s_port) in incoming.items():
+                if d_id != dst:
+                    continue
+                if s_id in seen:
+                    continue
+                seen.add(s_id)
+                if s_id in pure:
+                    result.add(s_id)
+                    stack.append(s_id)
+        return list(result)
+
+    def _gather_inputs_with_memo(self, nid: str, memo: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        node = self.instances[nid]
+        params = node.params()
+        kwargs: Dict[str, Any] = {}
+        for in_name in node.inputs().keys():
+            key = (nid, in_name)
+            if key in self.data_incoming:
+                src_id, src_port = self.data_incoming[key]
+                src_map = memo.get(src_id, self.results.get(src_id, {}))
+                kwargs[in_name] = src_map.get(src_port)
+            else:
+                dkey = DEFAULT_PREFIX + in_name
+                kwargs[in_name] = params.get(dkey, None)
+        return kwargs
+
+    def _gather_inputs_live(self, nid: str) -> Dict[str, Any]:
+        subset = self._collect_upstream_pure(nid)
+        memo: Dict[str, Dict[str, Any]] = {}
+        if subset:
+            order = self._topological_order_subset(subset)
+            for dnid in order:
+                dnode = self.instances[dnid]
+                dkwargs = self._gather_inputs_with_memo(dnid, memo)
+                dout = dnode.process(**dkwargs) or {}
+                memo[dnid] = dout
+                self.results[dnid] = dout
+        return self._gather_inputs_with_memo(nid, memo)
+
     def run(self) -> Dict[str, Dict[str, Any]]:
         self._classify()
-
-        if self.pure_nodes:
-            order = self._topological_order_subset(self.pure_nodes)
-            for nid in order:
-                node = self.instances[nid]
-                kwargs = self._gather_inputs(nid)
-                out = node.process(**kwargs) or {}
-                self.results[nid] = out
 
         entry_nodes = [nid for nid in self.exec_nodes if not self.instances[nid].exec_inputs()]
         queue: List[Tuple[str, Optional[str]]] = [(nid, None) for nid in entry_nodes]
@@ -125,7 +166,7 @@ class ExecutionEngine:
 
             nid, came_from = queue.pop(0)
             node = self.instances[nid]
-            kwargs = self._gather_inputs(nid)
+            kwargs = self._gather_inputs_live(nid)
 
             if self.hooks and hasattr(self.hooks, "on_node_start"):
                 try: self.hooks.on_node_start(nid)
