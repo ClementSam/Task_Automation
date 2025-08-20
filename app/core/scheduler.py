@@ -121,6 +121,62 @@ class Scheduler(QtCore.QObject):
                 kwargs[in_name] = params.get(key, None)
         return kwargs
 
+    # New helpers for on-demand evaluation of upstream pure nodes
+    def _collect_upstream_pure(self, nid: str) -> List[str]:
+        """Return list of upstream pure node ids for ``nid``.
+
+        Traverses data inputs recursively while the source node is pure
+        (i.e. has no exec inputs/outputs). Traversal stops when reaching
+        an exec node.
+        """
+        pure = set(self._pure_nodes)
+        seen = set()
+        result = set()
+        stack: List[str] = [nid]
+        incoming = self.data_incoming
+        while stack:
+            dst = stack.pop()
+            for (d_id, d_port), (s_id, s_port) in incoming.items():
+                if d_id != dst:
+                    continue
+                if s_id in seen:
+                    continue
+                seen.add(s_id)
+                if s_id in pure:
+                    result.add(s_id)
+                    stack.append(s_id)
+        return list(result)
+
+    def _gather_inputs_with_memo(self, nid: str, memo: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        """Gather inputs for ``nid`` prioritising memoised results."""
+        node = self.nodes[nid]
+        params = node.params()
+        kwargs: Dict[str, Any] = {}
+        for in_name in node.inputs().keys():
+            key = (nid, in_name)
+            if key in self.data_incoming:
+                src_id, src_port = self.data_incoming[key]
+                src_map = memo.get(src_id, self.results.get(src_id, {}))
+                kwargs[in_name] = src_map.get(src_port)
+            else:
+                dkey = DEFAULT_PREFIX + in_name
+                kwargs[in_name] = params.get(dkey, None)
+        return kwargs
+
+    def _gather_inputs_live(self, nid: str) -> Dict[str, Any]:
+        """Recalculate upstream pure nodes for ``nid`` and gather kwargs."""
+        subset = self._collect_upstream_pure(nid)
+        memo: Dict[str, Dict[str, Any]] = {}
+        if subset:
+            order = self._topological_order_subset(subset)
+            for dnid in order:
+                dnode = self.nodes[dnid]
+                dkwargs = self._gather_inputs_with_memo(dnid, memo)
+                dout = dnode.process(**dkwargs) or {}
+                memo[dnid] = dout
+                self.results[dnid] = dout
+        return self._gather_inputs_with_memo(nid, memo)
+
     def ui_node_set_listening(self, nid: str, on: bool) -> None:
         self.on_node_listening_changed.emit(nid, bool(on))
 
@@ -142,13 +198,6 @@ class Scheduler(QtCore.QObject):
 
     # ---- running -------------------------------------------------------
     def start_run(self):
-        # evaluate pure nodes synchronously
-        if self._pure_nodes:
-            order = self._topological_order_subset(self._pure_nodes)
-            for nid in order:
-                node = self.nodes[nid]
-                out = node.process(**self._gather_inputs(nid)) or {}
-                self.results[nid] = out
         # entry nodes have no exec inputs
         entry_nodes = [nid for nid in self._exec_nodes if not self.nodes[nid].exec_inputs()]
         for nid in entry_nodes:
@@ -177,7 +226,7 @@ class Scheduler(QtCore.QObject):
                         self.hooks.on_node_start(nid)
                     except Exception:
                         pass
-                kwargs = self._gather_inputs(nid)
+                kwargs = self._gather_inputs_live(nid)
                 kwargs.update(tok.data)
                 node.start(tid, **kwargs)
         finally:
@@ -213,7 +262,7 @@ class Scheduler(QtCore.QObject):
                     self.hooks.on_node_start(nid)
                 except Exception:
                     pass
-            kwargs = self._gather_inputs(nid)
+            kwargs = self._gather_inputs_live(nid)
             kwargs.update(self.tokens[nxt].data)
             node.start(nxt, **kwargs)
         # propagate exec edges
