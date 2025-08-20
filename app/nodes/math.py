@@ -1,6 +1,7 @@
 from typing import Dict, Any
 from .base import BaseNode
 from ..core.registry import registry
+from .utils import parse_bool_strict
 
 @registry.register
 class ConstantNumber(BaseNode):
@@ -17,12 +18,13 @@ class ConstantNumber(BaseNode):
         return "Constant (float)"
 
     def process(self, **kwargs) -> Dict[str, Any]:
-        v = self.params().get("value", 0.0)
+        raw = self.params().get("value", None)
+        if raw in (None, ""):
+            return {"value": None}
         try:
-            v = float(v)
+            return {"value": float(raw)}
         except Exception:
-            v = 0.0
-        return {"value": v}
+            return {"value": None}
 
 @registry.register
 class ConstantInt(BaseNode):
@@ -39,12 +41,13 @@ class ConstantInt(BaseNode):
         return "Constant (int)"
 
     def process(self, **kwargs) -> Dict[str, Any]:
-        v = self.params().get("value", 0)
+        raw = self.params().get("value", None)
+        if raw in (None, ""):
+            return {"value": None}
         try:
-            v = int(v)
+            return {"value": int(raw)}
         except Exception:
-            v = 0
-        return {"value": v}
+            return {"value": None}
 
 @registry.register
 class ConstantBool(BaseNode):
@@ -61,8 +64,8 @@ class ConstantBool(BaseNode):
         return "Constant (bool)"
 
     def process(self, **kwargs) -> Dict[str, Any]:
-        v = self.params().get("value", False)
-        return {"value": bool(v)}
+        b = parse_bool_strict(self.params().get("value", None))
+        return {"value": b}
 
 @registry.register
 class Add(BaseNode):
@@ -79,9 +82,12 @@ class Add(BaseNode):
         return {"sum": float}
 
     def process(self, a=None, b=None, **_) -> Dict[str, Any]:
-        a = 0.0 if a is None else float(a)
-        b = 0.0 if b is None else float(b)
-        return {"sum": a + b}
+        if a is None or b is None:
+            return {"sum": None}
+        try:
+            return {"sum": float(a) + float(b)}
+        except Exception:
+            return {"sum": None}
 
 @registry.register
 class Multiply(BaseNode):
@@ -98,6 +104,9 @@ class Multiply(BaseNode):
         return {"product": float}
 
     def process(self, a=None, b=None, **_) -> Dict[str, Any]:
-        a = 0.0 if a is None else float(a)
-        b = 0.0 if b is None else float(b)
-        return {"product": a * b}
+        if a is None or b is None:
+            return {"product": None}
+        try:
+            return {"product": float(a) * float(b)}
+        except Exception:
+            return {"product": None}
