@@ -4,9 +4,16 @@ from .base import BaseNode
 from ..core.registry import registry
 from .utils import parse_bool_strict
 
+try:
+    from PyQt5.QtSerialPort import QSerialPort
+except Exception:  # pragma: no cover - optional dependency
+    QSerialPort = object
+
 _TYPE_MAP = { 'String': str, 'Int': int, 'Float': float, 'Bool': bool }
 
 def _cast(val, tname: str):
+    if tname == 'SerialPortRef':
+        return val if val is None or isinstance(val, QSerialPort) else None
     typ = _TYPE_MAP.get(tname, str)
     if val is None:
         return None

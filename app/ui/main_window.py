@@ -15,7 +15,12 @@ from ..nodes import convert as convert_nodes  # noqa: F401
 from ..nodes import variables_runtime as variable_nodes  # noqa: F401
 from ..nodes.variables_runtime import _cast as cast_var
 
-DTYPE_MAP = {'String': str, 'Int': int, 'Float': float, 'Bool': bool}
+try:
+    from PyQt5.QtSerialPort import QSerialPort
+except Exception:  # pragma: no cover - optional dependency
+    QSerialPort = object
+
+DTYPE_MAP = {'String': str, 'Int': int, 'Float': float, 'Bool': bool, 'SerialPortRef': QSerialPort}
 
 
 class FileLogger(QtWidgets.QPlainTextEdit):
