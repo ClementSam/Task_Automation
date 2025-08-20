@@ -26,21 +26,28 @@ class ConnectPortCom(BaseNode):
     def exec_outputs(cls): return ["then"]
 
     @classmethod
-    def inputs(cls): return {"port": str, "baud": int}
+    def inputs(cls):
+        return {"port": str, "baud": int, "dtr": bool}
 
     @classmethod
     def outputs(cls):
         return {"serial_port": QSerialPort, "connected": bool}
 
-    def on_exec(self, port=None, baud=None, **_):
+    def on_exec(self, port=None, baud=None, dtr=None, **_):
         if not HAVE_SERIAL:
             raise RuntimeError("QtSerialPort manquant (PyQt5.QtSerialPort).")
         port = port or self._params.get("port") or "COM3"
         baud = baud or self._params.get("baud") or 115200
+        dtr = dtr if dtr is not None else self._params.get("dtr", True)
         ser = QSerialPort()
         ser.setPortName(str(port))
         ser.setBaudRate(int(baud) or 115200)
         ok = ser.open(QSerialPort.ReadWrite)
+        if ok and dtr is not None:
+            try:
+                ser.setDataTerminalReady(bool(dtr))
+            except Exception:
+                pass
         return (["then"], {"serial_port": ser if ok else None, "connected": ok})
 
 
