@@ -22,12 +22,27 @@ def test_save_and_load_graph(tmp_path: Path):
         EdgeSpec(kind="data", src_id="n2", src_port="sum", dst_id="n3", dst_port="text"),
     ]
 
+    variables = [{"name": "foo", "type": "Int", "init": 0}]
+    ui = {
+        "nodes": {
+            "n1": {"pos": [10, 20]},
+            "n2": {"pos": [30, 40]},
+            "n3": {"pos": [50, 60]},
+        },
+        "edges": [{"points": []}, {"points": [[1.0, 2.0]]}],
+        "comments": [
+            {"rect": [0, 0, 100, 50], "color": "#FFFFFF", "text": "note"}
+        ],
+    }
+
     path = tmp_path / "graph.json"
-    save_graph(nodes, edges, path)
-    loaded_nodes, loaded_edges = load_graph(path)
+    save_graph(nodes, edges, path, variables=variables, ui=ui)
+    loaded_nodes, loaded_edges, loaded_vars, loaded_ui = load_graph(path)
 
     assert loaded_nodes == nodes
     assert loaded_edges == edges
+    assert loaded_vars == variables
+    assert loaded_ui == ui
 
     engine = ExecutionEngine(loaded_nodes, loaded_edges, vars_init={})
     results = engine.run()

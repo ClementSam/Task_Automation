@@ -711,6 +711,74 @@ class GraphScene(QtWidgets.QGraphicsScene):
             edges.append(EdgeSpec(kind=e.kind, src_id=e.src_port.parent_node.node_id, src_port=e.src_port.name, dst_id=e.dst_port.parent_node.node_id, dst_port=e.dst_port.name))
         return nodes, edges
 
+    def serialize(self) -> Tuple[List[NodeSpec], List[EdgeSpec], dict]:
+        """Return nodes, edges and UI metadata for saving."""
+        nodes, edges = self.build_specs()
+        node_ui = {}
+        for nid, item in self.nodes.items():
+            node_ui[nid] = {"pos": [item.pos().x(), item.pos().y()]}
+
+        edge_ui = []
+        for e in self.edges:
+            edge_ui.append({
+                "points": [[cp.pos().x(), cp.pos().y()] for cp in e.control_points]
+            })
+
+        comments = []
+        for c in self.comments:
+            r = c.rect
+            comments.append({
+                "rect": [r.x(), r.y(), r.width(), r.height()],
+                "color": c.color.name(),
+                "text": c.label.toPlainText(),
+            })
+
+        ui = {"nodes": node_ui, "edges": edge_ui, "comments": comments}
+        return nodes, edges, ui
+
+    def deserialize(self, nodes: List[NodeSpec], edges: List[EdgeSpec], ui: dict) -> None:
+        """Clear the scene and rebuild it from saved data."""
+        self.clear()
+        self.nodes.clear()
+        self.edges.clear()
+        self.comments.clear()
+
+        node_ui = ui.get("nodes", {})
+        for spec in nodes:
+            pos = node_ui.get(spec.id, {}).get("pos", [0, 0])
+            item = self.add_node(spec.type_name, QtCore.QPointF(*pos), params=spec.params)
+            item.setPos(QtCore.QPointF(*pos))
+
+        for idx, spec in enumerate(edges):
+            try:
+                if spec.kind == "data":
+                    src_port = self.nodes[spec.src_id].outputs[spec.src_port]
+                    dst_port = self.nodes[spec.dst_id].inputs[spec.dst_port]
+                else:
+                    src_port = self.nodes[spec.src_id].exec_outputs[spec.src_port]
+                    dst_port = self.nodes[spec.dst_id].exec_inputs[spec.dst_port]
+            except KeyError:
+                continue
+            e_item = self._finalize_edge(src_port, dst_port)
+            if e_item:
+                self.edges.append(e_item)
+                points = ui.get("edges", [])
+                if idx < len(points):
+                    for x, y in points[idx].get("points", []):
+                        cp = ControlPointItem(e_item, QtCore.QPointF(x, y))
+                        self.addItem(cp)
+                        e_item.control_points.append(cp)
+                    e_item.update_path()
+
+        for cdata in ui.get("comments", []):
+            rect = cdata.get("rect", [0, 0, 300, 200])
+            color = QtGui.QColor(cdata.get("color", "#4CAF50"))
+            comment = self.add_comment(QtCore.QPointF(rect[0], rect[1]), color)
+            comment.rect = QtCore.QRectF(*rect)
+            comment.rect_item.setRect(comment.rect)
+            comment.label.setText(cdata.get("text", ""))
+            comment._update_handles()
+
 class GraphView(QtWidgets.QGraphicsView):
     def __init__(self, scene: GraphScene):
         super().__init__(scene)

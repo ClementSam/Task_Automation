@@ -4,6 +4,7 @@ from typing import Optional
 from datetime import datetime
 
 from .graph import GraphScene, GraphView, NodeItem, TYPE_COLORS, CommentItem
+from ..core.graph_io import save_graph, load_graph
 from ..core.registry import registry
 from ..core.engine import ExecutionEngine
 from ..core.engine_async import EngineRunner
@@ -116,6 +117,8 @@ class MainWindow(QtWidgets.QMainWindow):
         pauseAct = tb.addAction("Pause"); pauseAct.setCheckable(True); pauseAct.triggered.connect(self.toggle_pause)
         self.pauseAct = pauseAct
         clearAct = tb.addAction("Clear"); clearAct.triggered.connect(self.clear_graph)
+        saveAct = tb.addAction("Save"); saveAct.triggered.connect(self.save_graph_to_file)
+        loadAct = tb.addAction("Load"); loadAct.triggered.connect(self.load_graph_from_file)
         addCommentAct = tb.addAction("Commentaire"); addCommentAct.triggered.connect(self.add_comment_here)
         tb.addSeparator()
         self.actContinuous = tb.addAction("Exécution continue")
@@ -224,6 +227,45 @@ class MainWindow(QtWidgets.QMainWindow):
                 from datetime import datetime
                 ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
                 self.mw.log.appendPlainText(f"[{ts}] {out['printed']}")
+
+    def save_graph_to_file(self):
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save Graph", "", "Graph (*.json)")
+        if not path:
+            return
+        nodes, edges, ui = self.scene.serialize()
+        vars_defs = [
+            {"name": n, "type": t, "init": v}
+            for n, t, v in self.varsPanel.variables()
+        ]
+        try:
+            save_graph(nodes, edges, path, variables=vars_defs, ui=ui)
+            self.log.appendPlainText(f"[INFO] Graphe sauvegardé dans {path}")
+        except Exception as e:
+            self.log.appendPlainText(f"[ERREUR] Sauvegarde: {e}")
+
+    def load_graph_from_file(self):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load Graph", "", "Graph (*.json)")
+        if not path:
+            return
+        try:
+            nodes, edges, variables, ui = load_graph(path)
+            self.clear_graph()
+            self.scene.deserialize(nodes, edges, ui)
+            # Rebuild variables panel
+            self.varsPanel.table.setRowCount(0)
+            self.var_defs.clear()
+            for var in variables:
+                name = var.get("name", "")
+                tname = var.get("type", "String")
+                init = var.get("init", "")
+                self.varsPanel._add_row(name, tname, str(init))
+                self.var_defs[name] = (tname, cast_var(init, tname))
+                dtype = DTYPE_MAP.get(tname, str)
+                for item in self._iter_var_nodes(name):
+                    self._apply_variable_style(item, name, tname, dtype, error=False)
+            self.log.appendPlainText(f"[INFO] Graphe chargé depuis {path}")
+        except Exception as e:
+            self.log.appendPlainText(f"[ERREUR] Chargement: {e}")
 
     def run_graph(self):
         nodes, edges = self.scene.build_specs()
