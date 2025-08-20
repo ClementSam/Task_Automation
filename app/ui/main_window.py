@@ -371,7 +371,7 @@ class MainWindow(QtWidgets.QMainWindow):
         dtype = DTYPE_MAP.get(tname, str)
         params = {'name': name, 'type': tname, '_port_types': {'value': dtype}, 'subtitle': name}
         item = self.scene.add_node("GetVariable", pos, params=params)
-        item.header.setBrush(QtGui.QBrush(TYPE_COLORS[dtype]))
+        item.header.setBrush(QtGui.QBrush(TYPE_COLORS.get(dtype, TYPE_COLORS[object])))
         ed = item.output_editors.pop('value', None)
         if ed:
             self.scene.removeItem(ed)
@@ -381,7 +381,7 @@ class MainWindow(QtWidgets.QMainWindow):
         dtype = DTYPE_MAP.get(tname, str)
         params = {'name': name, 'type': tname, '_port_types': {'value': dtype}, 'subtitle': name}
         item = self.scene.add_node("SetVariable", pos, params=params)
-        item.header.setBrush(QtGui.QBrush(TYPE_COLORS[dtype]))
+        item.header.setBrush(QtGui.QBrush(TYPE_COLORS.get(dtype, TYPE_COLORS[object])))
 
 
 
