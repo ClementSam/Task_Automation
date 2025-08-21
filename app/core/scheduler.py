@@ -15,6 +15,7 @@ class Token:
     target: str
     data: Dict[str, Any]
     cancelled: bool = False
+    gid: int | None = None
 
 
 class Scheduler(QtCore.QObject):
@@ -51,6 +52,10 @@ class Scheduler(QtCore.QObject):
         self._paused = False
         # cockpit text cache (for ReadText)
         self._cockpit_text_cache: Dict[str, str] = {}
+        # group execution tracking for loop bodies
+        self._group_active: Dict[int, int] = {}
+        self._group_on_idle: Dict[int, list] = {}
+        self._next_gid: int = 1
 
 
     # ---- configuration -------------------------------------------------
@@ -77,6 +82,10 @@ class Scheduler(QtCore.QObject):
         self._paused = False
         # cockpit text cache (for ReadText)
         self._cockpit_text_cache: Dict[str, str] = {}
+        # group execution tracking for loop bodies
+        self._group_active: Dict[int, int] = {}
+        self._group_on_idle: Dict[int, list] = {}
+        self._next_gid: int = 1
 
 
         for spec in nodes:
@@ -191,11 +200,15 @@ class Scheduler(QtCore.QObject):
         self.on_node_listening_changed.emit(nid, bool(on))
 
     # ---- token helpers -------------------------------------------------
-    def _new_token(self, nid: str, data: Optional[Dict[str, Any]] = None) -> int:
+    def _new_token(self, nid: str, data: Optional[Dict[str, Any]] = None, *, gid: int | None = None) -> int:
         tid = self._next_token
         self._next_token += 1
-        self.tokens[tid] = Token(tid, nid, data or {})
+        tok = Token(tid, nid, data or {})
+        tok.gid = gid
+        self.tokens[tid] = tok
         self._inc_active(1)
+        if gid is not None:
+            self._group_active[gid] = self._group_active.get(gid, 0) + 1
         return tid
 
     def post_ready(self, tid: int) -> None:
@@ -245,11 +258,22 @@ class Scheduler(QtCore.QObject):
     # called by nodes when finished
     def on_node_finished(self, nid: str, tid: int, next_ports: Optional[List[str]], out: Optional[Dict[str, Any]]):
         node = self.nodes[nid]
+        # capture token and group id
+        tok = self.tokens.get(tid)
+        parent_gid = tok.gid if tok is not None else None
+
+        # mark node idle and remove token
         node.busy = False
         self.tokens.pop(tid, None)
         self._inc_active(-1)
+
+        # group accounting (defer idle notification until after child propagation)
+        if parent_gid is not None:
+            self._group_active[parent_gid] = max(0, self._group_active.get(parent_gid, 0) - 1)
+
+        # record outputs and fire hooks
         self.on_token_finished.emit(nid, tid)
-        prev = self.results.get(nid, {})
+        prev = self.results.get(nid, {}) or {}
         prev.update(out or {})
         self.results[nid] = prev
         if self.hooks and hasattr(self.hooks, "on_node_output"):
@@ -262,7 +286,8 @@ class Scheduler(QtCore.QObject):
                 self.hooks.on_node_finish(nid)
             except Exception:
                 pass
-        # start next token from local queue if any
+
+        # start next token from local queue if any (same node)
         nxt = node.dequeue_local()
         if nxt is not None:
             node.busy = True
@@ -275,7 +300,8 @@ class Scheduler(QtCore.QObject):
             kwargs = self._gather_inputs_live(nid)
             kwargs.update(self.tokens[nxt].data)
             node.start(nxt, **kwargs)
-        # propagate exec edges
+
+        # propagate exec edges, inheriting gid
         for port in next_ports or []:
             for (dst_id, dst_port) in self.exec_outgoing.get((nid, port), []):
                 if self.hooks and hasattr(self.hooks, "on_edge_fired"):
@@ -283,8 +309,13 @@ class Scheduler(QtCore.QObject):
                         self.hooks.on_edge_fired(nid, port, dst_id, dst_port)
                     except Exception:
                         pass
-                child = self._new_token(dst_id, {})
+                child = self._new_token(dst_id, {}, gid=parent_gid)
                 self.post_ready(child)
+
+        # after propagation, if group is empty, notify idle
+        if parent_gid is not None and self._group_active.get(parent_gid, 0) == 0:
+            self._notify_group_idle(parent_gid)
+
         self._maybe_finish()
 
     # cancellation -------------------------------------------------------
@@ -299,14 +330,58 @@ class Scheduler(QtCore.QObject):
         self.tokens.clear()
         self._ready.clear()
         self._active_tokens = 0
+        self._group_active.clear()
+        self._group_on_idle.clear()
         self._paused = False
         # cockpit text cache (for ReadText)
         self._cockpit_text_cache: Dict[str, str] = {}
+        # group execution tracking for loop bodies
+        self._group_active: Dict[int, int] = {}
+        self._group_on_idle: Dict[int, list] = {}
+        self._next_gid: int = 1
 
         self.on_state_changed.emit("stopped")
         self.on_active_tokens_changed.emit(0)
         self.on_reset_node_visuals.emit()
         QtCore.QTimer.singleShot(0, lambda: self.sigRunFinished.emit(dict(self.results)))
+
+    
+    def _notify_group_idle(self, gid: int) -> None:
+        cbs = self._group_on_idle.get(gid, []) or []
+        # Clear first to avoid re-entrancy double calls
+        self._group_on_idle[gid] = []
+        for cb in cbs:
+            try:
+                cb(gid)
+            except Exception:
+                pass
+    # ---- group execution helpers (for loop bodies) --------------------
+    def spawn_group(self, owner_node, out_port: str, *, on_idle=None) -> int:
+        """Spawn a subgraph from ``owner_node``'s exec out_port into a new group.
+        All tokens created from this out_port (and their descendants) will carry the group's gid.
+        When the group's active token count drops to 0, ``on_idle`` is called (if provided).
+        """
+        gid = self._next_gid
+        self._next_gid += 1
+        self._group_active[gid] = 0
+        if on_idle is not None:
+            self._group_on_idle[gid] = [on_idle]
+        else:
+            self._group_on_idle[gid] = []
+
+        nid = getattr(owner_node, "_nid", None)
+        if not nid:
+            return gid
+        # Fire exec edges from (nid, out_port)
+        created = 0
+        for (dst_id, dst_port) in self.exec_outgoing.get((nid, out_port), []):
+            child = self._new_token(dst_id, {}, gid=gid)
+            self.post_ready(child)
+            created += 1
+        if created == 0:
+            # No children → idle immediately
+            QtCore.QTimer.singleShot(0, lambda gid=gid: self._notify_group_idle(gid))
+        return gid
 
     # pause/resume ------------------------------------------------------
     def pause_all(self) -> None:
@@ -322,6 +397,10 @@ class Scheduler(QtCore.QObject):
         self._paused = False
         # cockpit text cache (for ReadText)
         self._cockpit_text_cache: Dict[str, str] = {}
+        # group execution tracking for loop bodies
+        self._group_active: Dict[int, int] = {}
+        self._group_on_idle: Dict[int, list] = {}
+        self._next_gid: int = 1
 
         for node in self.nodes.values():
             try:
