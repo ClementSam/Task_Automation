@@ -27,6 +27,10 @@ class Scheduler(QtCore.QObject):
     on_token_finished = QtCore.pyqtSignal(str, int)
     on_reset_node_visuals = QtCore.pyqtSignal()
     on_node_listening_changed = QtCore.pyqtSignal(str, bool)
+    # Cockpit signals
+    on_cockpit_led_set = QtCore.pyqtSignal(str, bool, object)
+    on_cockpit_text_set = QtCore.pyqtSignal(str, object, bool, bool)
+    on_cockpit_button_clicked = QtCore.pyqtSignal(str)
 
     def __init__(self, parent=None, hooks: Optional[object] = None):
         super().__init__(parent)
@@ -45,6 +49,9 @@ class Scheduler(QtCore.QObject):
         self._pure_nodes: List[str] = []
         self._exec_nodes: List[str] = []
         self._paused = False
+        # cockpit text cache (for ReadText)
+        self._cockpit_text_cache: Dict[str, str] = {}
+
 
     # ---- configuration -------------------------------------------------
     def set_continuous_run(self, enabled: bool) -> None:
@@ -68,6 +75,9 @@ class Scheduler(QtCore.QObject):
         self._next_token = 1
         self._active_tokens = 0
         self._paused = False
+        # cockpit text cache (for ReadText)
+        self._cockpit_text_cache: Dict[str, str] = {}
+
 
         for spec in nodes:
             inst = registry.create(spec.type_name, **spec.params)
@@ -290,6 +300,9 @@ class Scheduler(QtCore.QObject):
         self._ready.clear()
         self._active_tokens = 0
         self._paused = False
+        # cockpit text cache (for ReadText)
+        self._cockpit_text_cache: Dict[str, str] = {}
+
         self.on_state_changed.emit("stopped")
         self.on_active_tokens_changed.emit(0)
         self.on_reset_node_visuals.emit()
@@ -307,6 +320,9 @@ class Scheduler(QtCore.QObject):
 
     def resume_all(self) -> None:
         self._paused = False
+        # cockpit text cache (for ReadText)
+        self._cockpit_text_cache: Dict[str, str] = {}
+
         for node in self.nodes.values():
             try:
                 node.resume()
@@ -346,3 +362,22 @@ class Scheduler(QtCore.QObject):
                 self._emit_state("stopped")
             else:
                 self._emit_state("idle")
+
+    # ---- cockpit helpers ----------------------------------------------
+    def ui_cockpit_set_led(self, id: str, on: bool, color: str | None = None) -> None:
+        try:
+            self.on_cockpit_led_set.emit(str(id), bool(on), color)
+        except Exception:
+            pass
+
+    def ui_cockpit_set_text(self, id: str, text: object, clear: bool=False, append: bool=False) -> None:
+        try:
+            self.on_cockpit_text_set.emit(str(id), text, bool(clear), bool(append))
+        except Exception:
+            pass
+
+    def set_cockpit_text_cache(self, id: str, text: str) -> None:
+        self._cockpit_text_cache[str(id)] = text
+
+    def ui_cockpit_get_text(self, id: str) -> str | None:
+        return self._cockpit_text_cache.get(str(id))

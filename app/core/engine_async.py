@@ -29,6 +29,9 @@ class EngineRunner(QtCore.QObject):
     sigActiveTokens = QtCore.pyqtSignal(int)
     sigResetNodeVisuals = QtCore.pyqtSignal()
     sigNodeListening = QtCore.pyqtSignal(str, bool)
+    # Cockpit forwards (Scheduler -> UI)
+    sigCockpitLedSet = QtCore.pyqtSignal(str, bool, object)
+    sigCockpitTextSet = QtCore.pyqtSignal(str, object, bool, bool)
     sigError = QtCore.pyqtSignal(str)
 
     def __init__(self, parent=None):
@@ -59,6 +62,9 @@ class EngineRunner(QtCore.QObject):
             self._scheduler.on_active_tokens_changed.connect(self.sigActiveTokens)
             self._scheduler.on_reset_node_visuals.connect(self.sigResetNodeVisuals)
             self._scheduler.on_node_listening_changed.connect(self.sigNodeListening)
+            # cockpit
+            self._scheduler.on_cockpit_led_set.connect(self.sigCockpitLedSet)
+            self._scheduler.on_cockpit_text_set.connect(self.sigCockpitTextSet)
             # apply user choice before the run starts
             self._scheduler.set_continuous_run(self._continuous_desired)
             self._scheduler.setup(nodes, edges, vars_init or {})
@@ -82,3 +88,17 @@ class EngineRunner(QtCore.QObject):
         self._scheduler = None
         super().deleteLater()
 
+
+    def cockpitButtonClicked(self, id: str):
+        if self._scheduler:
+            try:
+                self._scheduler.on_cockpit_button_clicked.emit(str(id))
+            except Exception:
+                pass
+
+    def setCockpitTextCache(self, id: str, text: str):
+        if self._scheduler:
+            try:
+                self._scheduler.set_cockpit_text_cache(str(id), str(text))
+            except Exception:
+                pass

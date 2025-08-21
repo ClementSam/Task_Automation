@@ -9,11 +9,13 @@ from ..core.registry import registry
 from ..core.engine import ExecutionEngine
 from ..core.engine_async import EngineRunner
 from .variables_panel import VariablesPanel
+from .cockpit import CockpitWidget
 # register nodes
 from ..nodes import math as math_nodes  # noqa: F401
 from ..nodes import control as control_nodes  # noqa: F401
 from ..nodes import convert as convert_nodes  # noqa: F401
 from ..nodes import variables_runtime as variable_nodes  # noqa: F401
+from ..nodes import cockpit as cockpit_nodes  # noqa: F401
 from ..nodes.variables_runtime import _cast as cast_var
 
 try:
@@ -88,6 +90,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.varsDock = QtWidgets.QDockWidget("Variables", self)
         self.varsDock.setWidget(self.varsPanel)
         self.addDockWidget(QtCore.Qt.LeftDockWidgetArea, self.varsDock)
+        # Cockpit dock
+        self.cockpit = CockpitWidget(self)
+        self.cockpitDock = self.cockpit
+        self.addDockWidget(QtCore.Qt.RightDockWidgetArea, self.cockpitDock)
+
         # Create nodes from variables via panel
         self.varsPanel.addGetRequested.connect(self._spawn_get_variable)
         self.varsPanel.addSetRequested.connect(self._spawn_set_variable)
@@ -143,6 +150,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.engine_runner.sigResetNodeVisuals.connect(self.scene.ui_clear_all_nodes)
         self.engine_runner.sigNodeListening.connect(self.scene.set_node_listening)
         self.engine_runner.sigRunStarted.connect(lambda: self.log.appendPlainText("--- RUN (async) ---"))
+        # Cockpit connections
+        self.engine_runner.sigCockpitLedSet.connect(self.cockpit.set_led)
+        self.engine_runner.sigCockpitTextSet.connect(self.cockpit.apply_text_action)
+        self.cockpit.buttonClicked.connect(self.engine_runner.cockpitButtonClicked)
+        self.cockpit.textEdited.connect(self.engine_runner.setCockpitTextCache)
         self.engine_runner.sigRunFinished.connect(self._on_engine_finished)
         self.engine_runner.sigError.connect(lambda msg: self.log.appendPlainText(f"[ERREUR] {msg}"))
 
@@ -233,6 +245,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not path:
             return
         nodes, edges, ui = self.scene.serialize()
+        ui["cockpit"] = self.cockpit.serialize()
         vars_defs = [
             {"name": n, "type": t, "init": v}
             for n, t, v in self.varsPanel.variables()
@@ -251,6 +264,7 @@ class MainWindow(QtWidgets.QMainWindow):
             nodes, edges, variables, ui = load_graph(path)
             self.clear_graph()
             self.scene.deserialize(nodes, edges, ui)
+            self.cockpit.deserialize(ui.get("cockpit", {}))
             # Rebuild variables panel
             self.varsPanel.table.setRowCount(0)
             self.var_defs.clear()
