@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional, Tuple, Deque
 from collections import deque, defaultdict
 from PyQt5 import QtCore
@@ -15,6 +15,9 @@ class Token:
     target: str
     data: Dict[str, Any]
     cancelled: bool = False
+    parent: Optional[int] = None
+    work: int = 0
+    cont: List[str] = field(default_factory=list)
 
 
 class Scheduler(QtCore.QObject):
@@ -181,10 +184,12 @@ class Scheduler(QtCore.QObject):
         self.on_node_listening_changed.emit(nid, bool(on))
 
     # ---- token helpers -------------------------------------------------
-    def _new_token(self, nid: str, data: Optional[Dict[str, Any]] = None) -> int:
+    def _new_token(self, nid: str, data: Optional[Dict[str, Any]] = None, parent: Optional[int] = None) -> int:
         tid = self._next_token
         self._next_token += 1
-        self.tokens[tid] = Token(tid, nid, data or {})
+        self.tokens[tid] = Token(tid, nid, data or {}, parent=parent)
+        if parent is not None and parent in self.tokens:
+            self.tokens[parent].work += 1
         self._inc_active(1)
         return tid
 
@@ -195,6 +200,13 @@ class Scheduler(QtCore.QObject):
             self._emit_state("running")
         if not self._paused:
             QtCore.QTimer.singleShot(0, self.drain)
+
+    def push_continuation(self, tid: int, nid: str) -> None:
+        tok = self.tokens.get(tid)
+        if not tok:
+            return
+        tok.cont.append(nid)
+        self._inc_active(1)
 
     # ---- running -------------------------------------------------------
     def start_run(self):
@@ -234,9 +246,10 @@ class Scheduler(QtCore.QObject):
 
     # called by nodes when finished
     def on_node_finished(self, nid: str, tid: int, next_ports: Optional[List[str]], out: Optional[Dict[str, Any]]):
+        tok = self.tokens.get(tid)
+        parent_id = tok.parent if tok else None
         node = self.nodes[nid]
         node.busy = False
-        self.tokens.pop(tid, None)
         self._inc_active(-1)
         self.on_token_finished.emit(nid, tid)
         prev = self.results.get(nid, {})
@@ -273,8 +286,31 @@ class Scheduler(QtCore.QObject):
                         self.hooks.on_edge_fired(nid, port, dst_id, dst_port)
                     except Exception:
                         pass
-                child = self._new_token(dst_id, {})
+                child = self._new_token(dst_id, {}, parent=tid)
                 self.post_ready(child)
+
+        # handle continuation for current token
+        if tok:
+            if tok.work == 0 and tok.cont:
+                cont_node = tok.cont.pop()
+                tok.target = cont_node
+                self.post_ready(tid)
+            elif tok.work == 0 and not tok.cont:
+                self.tokens.pop(tid, None)
+
+        # notify parent that this branch finished
+        if parent_id is not None:
+            parent_tok = self.tokens.get(parent_id)
+            if parent_tok:
+                parent_tok.work -= 1
+                if parent_tok.work == 0:
+                    if parent_tok.cont:
+                        cont_node = parent_tok.cont.pop()
+                        parent_tok.target = cont_node
+                        self.post_ready(parent_id)
+                    else:
+                        self.tokens.pop(parent_id, None)
+
         self._maybe_finish()
 
     # cancellation -------------------------------------------------------
