@@ -159,52 +159,6 @@ class Sequence(BaseNode):
 
 
 @registry.register
-class ForLoop(BaseNode):
-    def __init__(self, **params):
-        super().__init__(**params)
-        self._states: Dict[int, Dict[str, int]] = {}
-
-    @classmethod
-    def exec_inputs(cls):
-        return ["in"]
-
-    @classmethod
-    def exec_outputs(cls):
-        return ["loop_body", "completed"]
-
-    @classmethod
-    def inputs(cls):
-        return {"first": int, "last": int}
-
-    @classmethod
-    def outputs(cls):
-        return {"index": int}
-
-    def on_exec(self, token_id=None, first=None, last=None, **_):
-        if token_id is None:
-            return ([], {})
-        state = self._states.get(token_id)
-        if state is None:
-            if first is None or last is None:
-                return ([], {})
-            try:
-                f = int(first)
-                l = int(last)
-            except Exception:
-                return ([], {})
-            state = {"index": f, "last": l}
-            self._states[token_id] = state
-        else:
-            state["index"] += 1
-        if state["index"] <= state["last"]:
-            self._scheduler.push_continuation(token_id, self._nid)
-            return (["loop_body"], {"index": state["index"]})
-        else:
-            self._states.pop(token_id, None)
-            return (["completed"], {})
-
-
-@registry.register
 class StopExecution(BaseNode):
     """Arrête l'exécution en cours (équivaut au bouton Stop)."""
 
