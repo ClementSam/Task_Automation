@@ -66,7 +66,7 @@ class BaseNode:
 
     # default start implementation for synchronous nodes
     def start(self, token_id: int, **kwargs) -> None:
-        outs, data = self.on_exec(**kwargs)
+        outs, data = self.on_exec(token_id=token_id, **kwargs)
         # bounce back to scheduler asynchronously to avoid re-entrancy
         QtCore.QTimer.singleShot(
             0,
