@@ -3,6 +3,7 @@ from typing import Dict, Any, List, Tuple
 from .base import BaseNode
 from ..core.registry import registry
 from .utils import parse_bool_strict
+from .scope_types import ScopeRef
 
 try:
     from PyQt5.QtSerialPort import QSerialPort
@@ -12,6 +13,8 @@ except Exception:  # pragma: no cover - optional dependency
 _TYPE_MAP = { 'String': str, 'Int': int, 'Float': float, 'Bool': bool }
 
 def _cast(val, tname: str):
+    if tname == 'ScopeRef':
+        return val if val is None or isinstance(val, ScopeRef) else None
     if tname == 'SerialPortRef':
         return val if val is None or isinstance(val, QSerialPort) else None
     typ = _TYPE_MAP.get(tname, str)

@@ -23,7 +23,7 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     QSerialPort = object
 
-DTYPE_MAP = {'String': str, 'Int': int, 'Float': float, 'Bool': bool, 'SerialPortRef': QSerialPort}
+DTYPE_MAP = {'String': str, 'Int': int, 'Float': float, 'Bool': bool, 'SerialPortRef': QSerialPort, 'ScopeRef': object}
 
 
 class FileLogger(QtWidgets.QPlainTextEdit):

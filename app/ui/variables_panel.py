@@ -1,12 +1,12 @@
 
 from PyQt5 import QtWidgets, QtCore
 
-_TYPES = ['String', 'Int', 'Float', 'Bool', 'SerialPortRef']
+_TYPES = ['String', 'Int', 'Float', 'Bool', 'SerialPortRef', 'ScopeRef']
 
 
 def _cast(val: str, tname: str) -> str:
     typemap = {'String': str, 'Int': int, 'Float': float, 'Bool': bool}
-    if tname == 'SerialPortRef':
+    if tname in ('SerialPortRef', 'ScopeRef'):
         return ''
     typ = typemap.get(tname, str)
     try:

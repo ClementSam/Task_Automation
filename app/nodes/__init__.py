@@ -6,3 +6,9 @@ try:
 except Exception:
     pass
 from . import variables_runtime, constants  # noqa: F401
+
+# optional: scope nodes (PyVISA)
+try:
+    from . import scope  # noqa: F401
+except Exception:
+    pass
