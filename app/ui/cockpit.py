@@ -19,6 +19,9 @@ class LedWidget(QtWidgets.QWidget):
             self._color_on = QtGui.QColor(color)
         self.update()
 
+    def isOn(self) -> bool:
+        return self._on
+
     def colorOn(self) -> QtGui.QColor: return self._color_on
     def colorOff(self) -> QtGui.QColor: return self._color_off
     def setColorOn(self, c: QtGui.QColor): self._color_on = c; self.update()
@@ -43,6 +46,16 @@ class LedWidget(QtWidgets.QWidget):
             grad.setColorAt(1.0, QtGui.QColor(col.red(), col.green(), col.blue(), 0))
             p.setBrush(grad)
             p.drawEllipse(rect.adjusted(-6,-6,6,6))
+
+
+class EditableLabel(QtWidgets.QLabel):
+    textEdited = QtCore.pyqtSignal(str)
+
+    def mouseDoubleClickEvent(self, e: QtGui.QMouseEvent):
+        txt, ok = QtWidgets.QInputDialog.getText(self, "Éditer", "Texte:", text=self.text())
+        if ok:
+            self.setText(txt)
+            self.textEdited.emit(txt)
 
 class TitleBar(QtWidgets.QFrame):
     renameRequested = QtCore.pyqtSignal()
@@ -108,7 +121,7 @@ class DraggableContainer(QtWidgets.QWidget):
     def __init__(self, id_: str, kind: str, content: QtWidgets.QWidget):
         super().__init__()
         self.id = id_
-        self.kind = kind  # 'btn' | 'text' | 'led'
+        self.kind = kind  # 'btn' | 'text' | 'led' | 'label'
         self._content = content
         lay = QtWidgets.QVBoxLayout(self); lay.setContentsMargins(4,4,4,4); lay.setSpacing(4)
         self.bar = TitleBar(id_)
@@ -119,6 +132,8 @@ class DraggableContainer(QtWidgets.QWidget):
             content.textEdited.connect(self.textEdited.emit)
         elif isinstance(content, QtWidgets.QTextEdit):
             content.textChanged.connect(lambda: self.textEdited.emit(content.toPlainText()))
+        elif isinstance(content, EditableLabel):
+            content.textEdited.connect(self.textEdited.emit)
 
     def setId(self, new_id: str):
         self.id = new_id
@@ -160,6 +175,7 @@ class CockpitWidget(QtWidgets.QDockWidget):
         self.btnAddLed = self.toolbar.addAction("LED")
         self.btnAddBtn = self.toolbar.addAction("Bouton")
         self.btnAddText = self.toolbar.addAction("Texte")
+        self.btnAddLabel = self.toolbar.addAction("Label")
 
         w = QtWidgets.QWidget()
         lay = QtWidgets.QVBoxLayout(w); lay.setContentsMargins(0,0,0,0); lay.setSpacing(4)
@@ -174,6 +190,7 @@ class CockpitWidget(QtWidgets.QDockWidget):
         self.btnAddLed.triggered.connect(lambda: self.add_led(self._unique_id("led")))
         self.btnAddBtn.triggered.connect(lambda: self.add_button(self._unique_id("btn")))
         self.btnAddText.triggered.connect(lambda: self.add_text(self._unique_id("text")))
+        self.btnAddLabel.triggered.connect(lambda: self.add_label(self._unique_id("label")))
 
     def _unique_id(self, prefix: str) -> str:
         i = 1
@@ -224,6 +241,20 @@ class CockpitWidget(QtWidgets.QDockWidget):
         if hasattr(widget, "setPlaceholderText"):
             widget.setPlaceholderText(placeholder)
         cont = DraggableContainer(id, "text", widget)
+        proxy = QtWidgets.QGraphicsProxyWidget()
+        proxy.setWidget(cont)
+        proxy.setFlags(QtWidgets.QGraphicsItem.ItemIsMovable | QtWidgets.QGraphicsItem.ItemIsSelectable)
+        proxy.setPos(pos)
+        self.scene.addItem(proxy)
+        self._items[id] = proxy
+        self._install_container_menu(cont)
+        return proxy
+
+    def add_label(self, id: str, pos: Optional[QtCore.QPointF]=None, text: str="Label") -> QtWidgets.QGraphicsProxyWidget:
+        if id in self._items: return self._items[id]
+        if pos is None: pos = self.view.mapToScene(self.view.viewport().rect().center())
+        lbl = EditableLabel(text)
+        cont = DraggableContainer(id, "label", lbl)
         proxy = QtWidgets.QGraphicsProxyWidget()
         proxy.setWidget(cont)
         proxy.setFlags(QtWidgets.QGraphicsItem.ItemIsMovable | QtWidgets.QGraphicsItem.ItemIsSelectable)
@@ -293,7 +324,18 @@ class CockpitWidget(QtWidgets.QDockWidget):
                     elif isinstance(w, QtWidgets.QTextEdit):
                         out["elements"].append({"type":"text","id":id_,"pos":pos,"props":{"multiline":True,"text":w.toPlainText()}})
                 elif kind == "led" and isinstance(w, LedWidget):
-                    out["elements"].append({"type":"led","id":id_,"pos":pos,"props":{"color_on":w.colorOn().name(),"color_off":w.colorOff().name(),"on":False}})
+                    out["elements"].append({
+                        "type": "led",
+                        "id": id_,
+                        "pos": pos,
+                        "props": {
+                            "color_on": w.colorOn().name(),
+                            "color_off": w.colorOff().name(),
+                            "on": w.isOn(),
+                        },
+                    })
+                elif kind == "label" and isinstance(w, QtWidgets.QLabel):
+                    out["elements"].append({"type": "label", "id": id_, "pos": pos, "props": {"text": w.text()}})
         return out
 
     def deserialize(self, data: Dict) -> None:
@@ -319,5 +361,9 @@ class CockpitWidget(QtWidgets.QDockWidget):
                 if isinstance(it, QtWidgets.QGraphicsProxyWidget):
                     kind, w = self._proxy_content(it)
                     txt = props.get("text","")
-                    if isinstance(w, QtWidgets.QLineEdit): w.setText(txt)
-                    elif isinstance(w, QtWidgets.QTextEdit): w.setPlainText(txt)
+                    if isinstance(w, QtWidgets.QLineEdit):
+                        w.setText(txt)
+                    elif isinstance(w, QtWidgets.QTextEdit):
+                        w.setPlainText(txt)
+            elif t == "label":
+                proxy = self.add_label(id_, pos, text=props.get("text", ""))
