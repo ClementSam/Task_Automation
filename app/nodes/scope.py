@@ -46,16 +46,16 @@ class connect_visa_vxi11(BaseNode):
         backend = _get_input_or_default(self, kwargs, "backend") or ""
 
         if not _need(host):
-            return ([], {})
+            return (["then"], {"scope_ref": None, "idn": "", "connected": False, "error": "Missing host or IP"})
         if not HAVE_VISA:
-            return ([], {"scope_ref": None, "idn": "", "connected": False, "error": "PyVISA non disponible. Installez 'pyvisa' et éventuellement 'pyvisa-py'."})
+            return (["then"], {"scope_ref": None, "idn": "", "connected": False, "error": "PyVISA non disponible. Installez 'pyvisa' et éventuellement 'pyvisa-py'."})
         try:
             scope = TekMSO5(str(host), int(timeout_ms), str(backend))
             idn = scope.idn() or ""
             ref = ScopeRef(resource_name=f"TCPIP::{host}::INSTR", idn=idn, resource=scope.resource)
             return (["then"], {"scope_ref": ref, "idn": idn, "connected": bool(idn), "error": ""})
         except Exception as e:
-            return ([], {"scope_ref": None, "idn": "", "connected": False, "error": str(e)})
+            return (["then"], {"scope_ref": None, "idn": "", "connected": False, "error": str(e)})
 
 @registry.register
 class disconnect(BaseNode):
