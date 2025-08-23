@@ -195,9 +195,10 @@ class TitleEditor(QtWidgets.QGraphicsProxyWidget):
     def setBrush(self, brush):  # type: ignore[override]
         """Mimic ``QGraphicsSimpleTextItem.setBrush`` for compatibility."""
         color = brush.color() if isinstance(brush, QtGui.QBrush) else QtGui.QColor(brush)
-        pal = self.widget.palette()
+        widget = self.widget()
+        pal = widget.palette()
         pal.setColor(QtGui.QPalette.Text, color)
-        self.widget.setPalette(pal)
+        widget.setPalette(pal)
 
 class PortItem(QtWidgets.QGraphicsEllipseItem):
     def __init__(self, name: str, is_output: bool, parent_node: "NodeItem", kind: str, dtype: type = object):
