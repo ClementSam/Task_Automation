@@ -202,8 +202,9 @@ class CockpitWidget(QtWidgets.QDockWidget):
         return f"{prefix}:{i}"
 
     def eventFilter(self, obj, event):
-        if obj is self.view and event.type() == QtCore.QEvent.KeyPress:
-            if event.key() in (QtCore.Qt.Key_Delete, QtCore.Qt.Key_Backspace):
+        if event.type() == QtCore.QEvent.KeyPress and \
+                event.key() in (QtCore.Qt.Key_Delete, QtCore.Qt.Key_Backspace):
+            if obj is self.view or isinstance(obj, (DraggableContainer, TitleBar)):
                 self.delete_selected()
                 return True
         return super().eventFilter(obj, event)
@@ -214,6 +215,11 @@ class CockpitWidget(QtWidgets.QDockWidget):
         container.bar.copyIdRequested.connect(lambda: QtWidgets.QApplication.clipboard().setText(container.id))
         container.bar.deleteRequested.connect(lambda: self.remove(container.id))
         container.textEdited.connect(lambda text, cid=container.id: self.textEdited.emit(cid, text))
+        # allow Delete key to remove items regardless of the focused widget
+        container.installEventFilter(self)
+        container.bar.installEventFilter(self)
+        if container.kind != "text":
+            container.contentWidget().installEventFilter(self)
 
     def add_led(self, id: str, pos: Optional[QtCore.QPointF]=None, color_on="#39d353", color_off="#3a3f44") -> QtWidgets.QGraphicsProxyWidget:
         if id in self._items: return self._items[id]
@@ -287,10 +293,17 @@ class CockpitWidget(QtWidgets.QDockWidget):
         if isinstance(w, DraggableContainer):
             w.setId(new_id)
 
+    def clear(self) -> None:
+        """Remove all cockpit elements."""
+        for it in list(self._items.values()):
+            if isinstance(it, QtWidgets.QGraphicsItem):
+                self.scene.removeItem(it)
+        self._items.clear()
+
     def remove(self, id: str) -> None:
         it = self._items.pop(id, None)
         if it:
-            self.scene.removeItem(it); it = None
+            self.scene.removeItem(it)
 
     def delete_selected(self) -> None:
         """Remove all currently selected cockpit elements."""
@@ -357,7 +370,6 @@ class CockpitWidget(QtWidgets.QDockWidget):
 
     def deserialize(self, data: Dict) -> None:
         self.clear()
-        self._items.clear()
         for el in (data or {}).get("elements", []):
             t = el.get("type")
             id_ = el.get("id","")
