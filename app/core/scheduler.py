@@ -199,6 +199,15 @@ class Scheduler(QtCore.QObject):
     def ui_node_set_listening(self, nid: str, on: bool) -> None:
         self.on_node_listening_changed.emit(nid, bool(on))
 
+    def trigger_custom_event(self, name: str) -> None:
+        """Spawn tokens for all CustomEvent nodes matching ``name``."""
+        for nid, node in self.nodes.items():
+            if getattr(node, "is_custom_event", False):
+                params = node.params()
+                if params.get("name") == name:
+                    tid = self._new_token(nid, {})
+                    self.post_ready(tid)
+
     # ---- token helpers -------------------------------------------------
     def _new_token(self, nid: str, data: Optional[Dict[str, Any]] = None, *, gid: int | None = None) -> int:
         tid = self._next_token
@@ -224,6 +233,9 @@ class Scheduler(QtCore.QObject):
         # entry nodes have no exec inputs
         entry_nodes = [nid for nid in self._exec_nodes if not self.nodes[nid].exec_inputs()]
         for nid in entry_nodes:
+            inst = self.nodes[nid]
+            if not getattr(inst, "auto_start", True):
+                continue
             tid = self._new_token(nid, {})
             self.post_ready(tid)
 

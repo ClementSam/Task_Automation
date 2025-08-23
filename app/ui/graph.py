@@ -308,13 +308,19 @@ class NodeItem(QtWidgets.QGraphicsObject):
 
         node_cls = registry.types()[type_name]
         title = node_cls.title()
+        if getattr(node_cls, 'allow_title_edit', False):
+            title = params.get('name', title)
 
         color_attr = getattr(node_cls, 'COLOR', None) or getattr(node_cls, 'color', None)
         if getattr(node_cls, 'event_node', False):
             self.header.setBrush(QtGui.QBrush(QtGui.QColor('#C0392B')))
         elif color_attr:
             self.header.setBrush(QtGui.QBrush(QtGui.QColor(color_attr)))
-        self.title_item = QtWidgets.QGraphicsSimpleTextItem(title, self)
+        if getattr(node_cls, 'allow_title_edit', False):
+            self._params.setdefault('name', title)
+            self.title_item = EditableTextItem(title, self, self._on_title_changed)
+        else:
+            self.title_item = QtWidgets.QGraphicsSimpleTextItem(title, self)
         # optional subtitle (e.g., variable name)
         subtitle = self._params.get('subtitle') if isinstance(self._params, dict) else None
         if subtitle:
@@ -452,11 +458,15 @@ class NodeItem(QtWidgets.QGraphicsObject):
                     e.update_path()
         return super().itemChange(change, value)
 
+    def _on_title_changed(self, text: str) -> None:
+        self._params['name'] = text
+
 class EditableTextItem(QtWidgets.QGraphicsTextItem):
-    def __init__(self, text, parent=None):
+    def __init__(self, text, parent=None, on_changed=None):
         super().__init__(text, parent)
         self.setDefaultTextColor(QtGui.QColor(230,230,230))
         self.setTextInteractionFlags(QtCore.Qt.NoTextInteraction)
+        self._on_changed = on_changed
 
     def mouseDoubleClickEvent(self, event):
         self.setTextInteractionFlags(QtCore.Qt.TextEditorInteraction)
@@ -466,6 +476,8 @@ class EditableTextItem(QtWidgets.QGraphicsTextItem):
     def focusOutEvent(self, event):
         self.setTextInteractionFlags(QtCore.Qt.NoTextInteraction)
         super().focusOutEvent(event)
+        if self._on_changed:
+            self._on_changed(self.toPlainText())
 
 class ResizerHandle(QtWidgets.QGraphicsRectItem):
     SIZE = 10
