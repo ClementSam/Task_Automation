@@ -40,3 +40,19 @@ def test_cockpit_save_load_led_and_label():
 
     if created:
         app.quit()
+
+
+def test_cockpit_delete_selected():
+    app, created = _setup_qt()
+    from app.ui.cockpit import CockpitWidget
+
+    c = CockpitWidget()
+    c.add_button("btn:1")
+    proxy = c._items["btn:1"]
+    proxy.setSelected(True)
+    c.delete_selected()
+    assert "btn:1" not in c._items
+
+    if created:
+        app.quit()
+

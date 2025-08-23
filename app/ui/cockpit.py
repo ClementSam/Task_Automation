@@ -184,6 +184,9 @@ class CockpitWidget(QtWidgets.QDockWidget):
         self.scene = CockpitScene(self)
         self.view = QtWidgets.QGraphicsView(self.scene)
         self.view.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        # enable keyboard focus so the Delete key can remove items
+        self.view.setFocusPolicy(QtCore.Qt.StrongFocus)
+        self.view.installEventFilter(self)
         lay.addWidget(self.view)
         self.setWidget(w)
 
@@ -197,6 +200,13 @@ class CockpitWidget(QtWidgets.QDockWidget):
         while f"{prefix}:{i}" in self._items:
             i += 1
         return f"{prefix}:{i}"
+
+    def eventFilter(self, obj, event):
+        if obj is self.view and event.type() == QtCore.QEvent.KeyPress:
+            if event.key() in (QtCore.Qt.Key_Delete, QtCore.Qt.Key_Backspace):
+                self.delete_selected()
+                return True
+        return super().eventFilter(obj, event)
 
     # ---- API ----
     def _install_container_menu(self, container: DraggableContainer):
@@ -281,6 +291,13 @@ class CockpitWidget(QtWidgets.QDockWidget):
         it = self._items.pop(id, None)
         if it:
             self.scene.removeItem(it); it = None
+
+    def delete_selected(self) -> None:
+        """Remove all currently selected cockpit elements."""
+        for id_, it in list(self._items.items()):
+            if isinstance(it, QtWidgets.QGraphicsItem) and it.isSelected():
+                self.scene.removeItem(it)
+                self._items.pop(id_, None)
 
     def _proxy_content(self, proxy: QtWidgets.QGraphicsProxyWidget):
         w = proxy.widget()
