@@ -57,22 +57,84 @@ class EditableLabel(QtWidgets.QLabel):
             self.setText(txt)
             self.textEdited.emit(txt)
 
+class TitleEdit(QtWidgets.QLineEdit):
+    """Line edit used in cockpit title bars.
+
+    It starts in a read-only state so the parent TitleBar can be used as a
+    drag handle. A double click enables editing and a focus out commits the
+    new text via the ``renamed`` signal. While read-only, mouse events are
+    forwarded to the parent so dragging still works."""
+
+    renamed = QtCore.pyqtSignal(str)
+
+    def __init__(self, text: str, parent: QtWidgets.QWidget | None = None):
+        super().__init__(text, parent)
+        self.setReadOnly(True)
+        self.setFrame(True)
+        self.setStyleSheet(
+            "QLineEdit { background: #404552; color: white; border: 1px solid #6c6f7c; padding-left: 6px; }"
+        )
+        self.setCursor(QtCore.Qt.SizeAllCursor)
+
+    # forward mouse events to parent while read-only so the bar remains draggable
+    def _forward(self, method_name: str, e: QtGui.QMouseEvent):
+        parent = self.parent()
+        if parent is not None:
+            getattr(parent, method_name)(e)
+
+    def mousePressEvent(self, e: QtGui.QMouseEvent):
+        if self.isReadOnly():
+            self._forward("mousePressEvent", e)
+        else:
+            super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e: QtGui.QMouseEvent):
+        if self.isReadOnly():
+            self._forward("mouseMoveEvent", e)
+        else:
+            super().mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e: QtGui.QMouseEvent):
+        if self.isReadOnly():
+            self._forward("mouseReleaseEvent", e)
+        else:
+            super().mouseReleaseEvent(e)
+
+    def mouseDoubleClickEvent(self, e: QtGui.QMouseEvent):
+        if e.button() == QtCore.Qt.LeftButton:
+            self.setReadOnly(False)
+            self.setCursor(QtCore.Qt.IBeamCursor)
+            self.setFocus(QtCore.Qt.MouseFocusReason)
+            self.selectAll()
+            e.accept()
+            return
+        super().mouseDoubleClickEvent(e)
+
+    def focusOutEvent(self, e: QtGui.QFocusEvent):
+        if not self.isReadOnly():
+            self.setReadOnly(True)
+            self.setCursor(QtCore.Qt.SizeAllCursor)
+            self.renamed.emit(self.text())
+        super().focusOutEvent(e)
+
 class TitleBar(QtWidgets.QFrame):
     renameRequested = QtCore.pyqtSignal()
     copyIdRequested = QtCore.pyqtSignal()
     deleteRequested = QtCore.pyqtSignal()
+    titleEdited = QtCore.pyqtSignal(str)
 
     def __init__(self, label_text: str):
         super().__init__()
         self.setFixedHeight(18)
         self.setCursor(QtCore.Qt.SizeAllCursor)
         self.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        self.setStyleSheet("QFrame { background: #404552; color: white; border-radius: 4px; } QLabel { padding-left: 6px; }")
+        self.setStyleSheet("QFrame { background: #404552; color: white; border-radius: 4px; }")
         lay = QtWidgets.QHBoxLayout(self)
-        lay.setContentsMargins(6,0,6,0)
-        self.lbl = QtWidgets.QLabel(label_text)
+        lay.setContentsMargins(0,0,0,0)
+        self.lbl = TitleEdit(label_text, self)
         self.lbl.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
         lay.addWidget(self.lbl)
+        self.lbl.renamed.connect(self.titleEdited.emit)
         self._drag_pos = None
 
     def setText(self, txt: str):
@@ -211,10 +273,17 @@ class CockpitWidget(QtWidgets.QDockWidget):
 
     # ---- API ----
     def _install_container_menu(self, container: DraggableContainer):
-        container.bar.renameRequested.connect(lambda: self._rename_item(container.id))
-        container.bar.copyIdRequested.connect(lambda: QtWidgets.QApplication.clipboard().setText(container.id))
-        container.bar.deleteRequested.connect(lambda: self.remove(container.id))
-        container.textEdited.connect(lambda text, cid=container.id: self.textEdited.emit(cid, text))
+        container.bar.renameRequested.connect(lambda c=container: self._rename_item(c.id))
+
+        def _apply_title(text, c=container):
+            old_id = c.id
+            if not self._rename_item(old_id, text):
+                c.bar.setText(old_id)
+
+        container.bar.titleEdited.connect(_apply_title)
+        container.bar.copyIdRequested.connect(lambda c=container: QtWidgets.QApplication.clipboard().setText(c.id))
+        container.bar.deleteRequested.connect(lambda c=container: self.remove(c.id))
+        container.textEdited.connect(lambda text, c=container: self.textEdited.emit(c.id, text))
         # allow Delete key to remove items regardless of the focused widget
         container.installEventFilter(self)
         container.bar.installEventFilter(self)
@@ -280,18 +349,25 @@ class CockpitWidget(QtWidgets.QDockWidget):
         self._install_container_menu(cont)
         return proxy
 
-    def _rename_item(self, old_id: str):
+    def _rename_item(self, old_id: str, new_id: Optional[str] = None) -> bool:
         it = self._items.get(old_id)
-        if not it: return
-        new_id, ok = QtWidgets.QInputDialog.getText(self, "Renommer l'élément", "Nouvel ID :", text=old_id)
-        if not ok or not new_id or new_id == old_id: return
+        if not it:
+            return False
+        if new_id is None:
+            new_id, ok = QtWidgets.QInputDialog.getText(self, "Renommer l'élément", "Nouvel ID :", text=old_id)
+            if not ok:
+                return False
+        if not new_id or new_id == old_id:
+            return False
         if new_id in self._items:
-            QtWidgets.QMessageBox.warning(self, "Conflit", f"L'ID '{new_id}' existe déjà."); return
+            QtWidgets.QMessageBox.warning(self, "Conflit", f"L'ID '{new_id}' existe déjà.")
+            return False
         self._items[new_id] = it
         self._items.pop(old_id, None)
         w = it.widget()
         if isinstance(w, DraggableContainer):
             w.setId(new_id)
+        return True
 
     def clear(self) -> None:
         """Remove all cockpit elements."""
