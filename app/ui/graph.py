@@ -468,6 +468,18 @@ class EditableTextItem(QtWidgets.QGraphicsTextItem):
         self.setTextInteractionFlags(QtCore.Qt.NoTextInteraction)
         self._on_changed = on_changed
 
+    # QGraphicsSimpleTextItem exposes ``setBrush`` to change its color while
+    # QGraphicsTextItem (our base class) uses ``setDefaultTextColor``.  NodeItem
+    # expects a ``setBrush`` method regardless of the concrete text item type,
+    # so provide a compatible implementation here to avoid attribute errors
+    # when editable titles are used.
+    def setBrush(self, brush):  # type: ignore[override]
+        if isinstance(brush, QtGui.QBrush):
+            color = brush.color()
+        else:
+            color = QtGui.QColor(brush)
+        self.setDefaultTextColor(color)
+
     def mouseDoubleClickEvent(self, event):
         self.setTextInteractionFlags(QtCore.Qt.TextEditorInteraction)
         self.setFocus(QtCore.Qt.MouseFocusReason)
