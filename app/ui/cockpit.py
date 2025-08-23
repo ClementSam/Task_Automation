@@ -258,8 +258,15 @@ class CockpitWidget(QtWidgets.QDockWidget):
         return f"{prefix}:{i}"
 
     def eventFilter(self, obj, event):
-        if event.type() == QtCore.QEvent.KeyPress and \
-                event.key() in (QtCore.Qt.Key_Delete, QtCore.Qt.Key_Backspace):
+        if (
+            event.type() == QtCore.QEvent.KeyPress
+            and event.key() in (QtCore.Qt.Key_Delete, QtCore.Qt.Key_Backspace)
+        ):
+            # if a text-editing widget currently has focus, allow it to handle
+            # the key press so users can edit titles/fields normally
+            focus = QtWidgets.QApplication.focusWidget()
+            if isinstance(focus, (QtWidgets.QLineEdit, QtWidgets.QTextEdit)):
+                return False
             if obj is self.view or isinstance(obj, (DraggableContainer, TitleBar)):
                 self.delete_selected()
                 return True
