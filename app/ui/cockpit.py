@@ -184,6 +184,13 @@ class CockpitWidget(QtWidgets.QDockWidget):
         self.scene = CockpitScene(self)
         self.view = QtWidgets.QGraphicsView(self.scene)
         self.view.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        # enable keyboard focus so the Delete key can remove items
+        self.view.setFocusPolicy(QtCore.Qt.StrongFocus)
+        # watch key presses for the view and its children so Delete/Backspace
+        # can remove selected cockpit elements
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
         lay.addWidget(self.view)
         self.setWidget(w)
 
@@ -197,6 +204,20 @@ class CockpitWidget(QtWidgets.QDockWidget):
         while f"{prefix}:{i}" in self._items:
             i += 1
         return f"{prefix}:{i}"
+
+    def eventFilter(self, obj, event):
+        if event.type() == QtCore.QEvent.KeyPress and isinstance(obj, QtWidgets.QWidget):
+            if obj is self.view or self.view.isAncestorOf(obj):
+                if event.key() in (QtCore.Qt.Key_Delete, QtCore.Qt.Key_Backspace):
+                    # Only consume the event if something is actually selected so
+                    # normal text editing keeps working.
+                    if any(
+                        isinstance(it, QtWidgets.QGraphicsItem) and it.isSelected()
+                        for it in self._items.values()
+                    ):
+                        self.delete_selected()
+                        return True
+        return super().eventFilter(obj, event)
 
     # ---- API ----
     def _install_container_menu(self, container: DraggableContainer):
@@ -282,6 +303,13 @@ class CockpitWidget(QtWidgets.QDockWidget):
         if it:
             self.scene.removeItem(it); it = None
 
+    def delete_selected(self) -> None:
+        """Remove all currently selected cockpit elements."""
+        for id_, it in list(self._items.items()):
+            if isinstance(it, QtWidgets.QGraphicsItem) and it.isSelected():
+                self.scene.removeItem(it)
+                self._items.pop(id_, None)
+
     def _proxy_content(self, proxy: QtWidgets.QGraphicsProxyWidget):
         w = proxy.widget()
         if isinstance(w, DraggableContainer):
@@ -339,7 +367,8 @@ class CockpitWidget(QtWidgets.QDockWidget):
         return out
 
     def deserialize(self, data: Dict) -> None:
-        self.clear()
+        # remove any existing items before recreating from serialized data
+        self.scene.clear()
         self._items.clear()
         for el in (data or {}).get("elements", []):
             t = el.get("type")

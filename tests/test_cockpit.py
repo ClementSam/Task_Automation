@@ -2,6 +2,8 @@ import os
 import pytest
 
 QtWidgets = pytest.importorskip("PyQt5.QtWidgets")
+QtCore = pytest.importorskip("PyQt5.QtCore")
+QtGui = pytest.importorskip("PyQt5.QtGui")
 
 
 def _setup_qt():
@@ -40,3 +42,36 @@ def test_cockpit_save_load_led_and_label():
 
     if created:
         app.quit()
+
+
+def test_cockpit_delete_selected():
+    app, created = _setup_qt()
+    from app.ui.cockpit import CockpitWidget
+
+    c = CockpitWidget()
+    c.add_button("btn:1")
+    proxy = c._items["btn:1"]
+    proxy.setSelected(True)
+    c.delete_selected()
+    assert "btn:1" not in c._items
+
+    if created:
+        app.quit()
+
+
+def test_cockpit_delete_with_keypress():
+    app, created = _setup_qt()
+    from app.ui.cockpit import CockpitWidget
+
+    c = CockpitWidget()
+    c.add_button("btn:1")
+    proxy = c._items["btn:1"]
+    proxy.setSelected(True)
+    # simulate Delete key press on the viewport
+    evt = QtGui.QKeyEvent(QtCore.QEvent.KeyPress, QtCore.Qt.Key_Delete, QtCore.Qt.NoModifier)
+    QtWidgets.QApplication.sendEvent(c.view.viewport(), evt)
+    assert "btn:1" not in c._items
+
+    if created:
+        app.quit()
+

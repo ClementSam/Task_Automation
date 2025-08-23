@@ -33,6 +33,11 @@ def test_save_and_load_graph(tmp_path: Path):
         "comments": [
             {"rect": [0, 0, 100, 50], "color": "#FFFFFF", "text": "note"}
         ],
+        "cockpit": {
+            "elements": [
+                {"type": "label", "id": "lbl:1", "pos": [0, 0], "props": {"text": "hello"}}
+            ]
+        },
     }
 
     path = tmp_path / "graph.json"

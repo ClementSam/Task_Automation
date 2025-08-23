@@ -124,11 +124,10 @@ def load_graph(path: str | Path) -> Tuple[List[NodeSpec], List[EdgeSpec], List[D
 
     ui_block = data.get("ui")
     if isinstance(ui_block, dict):
-        ui: Dict[str, Any] = {
-            "nodes": _coerce_json(ui_block.get("nodes", {})) or node_ui,
-            "edges": _coerce_json(ui_block.get("edges", [])) or edge_ui,
-            "comments": _coerce_json(ui_block.get("comments", [])),
-        }
+        ui: Dict[str, Any] = {k: _coerce_json(v) for k, v in ui_block.items()}
+        ui["nodes"] = ui.get("nodes") or node_ui
+        ui["edges"] = ui.get("edges") or edge_ui
+        ui["comments"] = ui.get("comments") or []
     else:
         ui = {
             "nodes": node_ui,
