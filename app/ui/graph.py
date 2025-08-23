@@ -309,7 +309,7 @@ class NodeItem(QtWidgets.QGraphicsObject):
         node_cls = registry.types()[type_name]
         title = node_cls.title()
         if getattr(node_cls, 'allow_title_edit', False):
-            title = params.get('name', title)
+            title = self._params.get('name', title)
 
         color_attr = getattr(node_cls, 'COLOR', None) or getattr(node_cls, 'color', None)
         if getattr(node_cls, 'event_node', False):
