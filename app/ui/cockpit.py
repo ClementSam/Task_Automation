@@ -60,61 +60,55 @@ class EditableLabel(QtWidgets.QLabel):
 class TitleEdit(QtWidgets.QLineEdit):
     """Line edit used in cockpit title bars.
 
-    It starts in a read-only state so the parent TitleBar can be used as a
-    drag handle. A double click enables editing and a focus out commits the
-    new text via the ``renamed`` signal. While read-only, mouse events are
-    forwarded to the parent so dragging still works."""
+    The label above each cockpit element is now an always-editable text field.
+    To keep the element draggable, mouse events are forwarded to the parent
+    ``TitleBar`` once the cursor moves beyond the platform drag threshold. On
+    commit (focus out or return key) the ``renamed`` signal is emitted."""
 
     renamed = QtCore.pyqtSignal(str)
 
     def __init__(self, text: str, parent: QtWidgets.QWidget | None = None):
         super().__init__(text, parent)
-        self.setReadOnly(True)
         self.setFrame(True)
         self.setStyleSheet(
             "QLineEdit { background: #404552; color: white; border: 1px solid #6c6f7c; padding-left: 6px; }"
         )
-        self.setCursor(QtCore.Qt.SizeAllCursor)
+        # track drag start position to differentiate between edit and move
+        self._drag_start: QtCore.QPoint | None = None
+        self.editingFinished.connect(lambda: self.renamed.emit(self.text()))
 
-    # forward mouse events to parent while read-only so the bar remains draggable
-    def _forward(self, method_name: str, e: QtGui.QMouseEvent):
+    def _forward(self, method_name: str, e: QtGui.QMouseEvent) -> None:
         parent = self.parent()
         if parent is not None:
             getattr(parent, method_name)(e)
 
-    def mousePressEvent(self, e: QtGui.QMouseEvent):
-        if self.isReadOnly():
-            self._forward("mousePressEvent", e)
-        else:
-            super().mousePressEvent(e)
-
-    def mouseMoveEvent(self, e: QtGui.QMouseEvent):
-        if self.isReadOnly():
-            self._forward("mouseMoveEvent", e)
-        else:
-            super().mouseMoveEvent(e)
-
-    def mouseReleaseEvent(self, e: QtGui.QMouseEvent):
-        if self.isReadOnly():
-            self._forward("mouseReleaseEvent", e)
-        else:
-            super().mouseReleaseEvent(e)
-
-    def mouseDoubleClickEvent(self, e: QtGui.QMouseEvent):
+    def mousePressEvent(self, e: QtGui.QMouseEvent) -> None:  # type: ignore[override]
         if e.button() == QtCore.Qt.LeftButton:
-            self.setReadOnly(False)
-            self.setCursor(QtCore.Qt.IBeamCursor)
-            self.setFocus(QtCore.Qt.MouseFocusReason)
-            self.selectAll()
-            e.accept()
-            return
-        super().mouseDoubleClickEvent(e)
+            self._drag_start = e.globalPos()
+            self._forward("mousePressEvent", e)
+        super().mousePressEvent(e)
 
-    def focusOutEvent(self, e: QtGui.QFocusEvent):
-        if not self.isReadOnly():
-            self.setReadOnly(True)
-            self.setCursor(QtCore.Qt.SizeAllCursor)
-            self.renamed.emit(self.text())
+    def mouseMoveEvent(self, e: QtGui.QMouseEvent) -> None:  # type: ignore[override]
+        if (
+            self._drag_start is not None
+            and (e.globalPos() - self._drag_start).manhattanLength() > QtWidgets.QApplication.startDragDistance()
+        ):
+            self._forward("mouseMoveEvent", e)
+            return
+        super().mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e: QtGui.QMouseEvent) -> None:  # type: ignore[override]
+        if self._drag_start is not None:
+            self._forward("mouseReleaseEvent", e)
+            self._drag_start = None
+        super().mouseReleaseEvent(e)
+
+    def contextMenuEvent(self, e: QtGui.QContextMenuEvent) -> None:  # type: ignore[override]
+        """Forward context menu to parent so TitleBar's actions are available."""
+        self._forward("contextMenuEvent", e)  # type: ignore[arg-type]
+
+    def focusOutEvent(self, e: QtGui.QFocusEvent) -> None:  # type: ignore[override]
+        self.renamed.emit(self.text())
         super().focusOutEvent(e)
 
 class TitleBar(QtWidgets.QFrame):
