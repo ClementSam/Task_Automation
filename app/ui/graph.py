@@ -173,6 +173,32 @@ class OutputEditor(QtWidgets.QGraphicsProxyWidget):
         elif isinstance(self.widget, QtWidgets.QDoubleSpinBox):
             self.node_item._params[self.param_key] = float(self.widget.value())
 
+
+class TitleEditor(QtWidgets.QGraphicsProxyWidget):
+    """Inline editor for node titles.
+
+    Unlike ``EditableTextItem`` which requires a double click to enter edit
+    mode, this editor always renders as a line edit so users immediately see
+    that the title is editable.
+    """
+
+    def __init__(self, parent: "NodeItem", text: str, on_changed):
+        super().__init__(parent)
+        self._on_changed = on_changed
+        line = QtWidgets.QLineEdit(text)
+        line.setFixedWidth(NODE_W - 16)
+        line.textChanged.connect(lambda t: self._on_changed(t))
+        self.setWidget(line)
+        self.setAcceptedMouseButtons(QtCore.Qt.AllButtons)
+        self.setFlag(QtWidgets.QGraphicsItem.ItemIsFocusable, True)
+
+    def setBrush(self, brush):  # type: ignore[override]
+        """Mimic ``QGraphicsSimpleTextItem.setBrush`` for compatibility."""
+        color = brush.color() if isinstance(brush, QtGui.QBrush) else QtGui.QColor(brush)
+        pal = self.widget.palette()
+        pal.setColor(QtGui.QPalette.Text, color)
+        self.widget.setPalette(pal)
+
 class PortItem(QtWidgets.QGraphicsEllipseItem):
     def __init__(self, name: str, is_output: bool, parent_node: "NodeItem", kind: str, dtype: type = object):
         r = EXEC_PORT_RADIUS if kind == "exec" else PORT_RADIUS
@@ -318,7 +344,7 @@ class NodeItem(QtWidgets.QGraphicsObject):
             self.header.setBrush(QtGui.QBrush(QtGui.QColor(color_attr)))
         if getattr(node_cls, 'allow_title_edit', False):
             self._params.setdefault('name', title)
-            self.title_item = EditableTextItem(title, self, self._on_title_changed)
+            self.title_item = TitleEditor(self, title, self._on_title_changed)
         else:
             self.title_item = QtWidgets.QGraphicsSimpleTextItem(title, self)
         # optional subtitle (e.g., variable name)
