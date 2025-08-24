@@ -1,6 +1,8 @@
 from PyQt5 import QtCore
 
 from .scheduler import Scheduler
+from .logctl import enabled, thread_label
+
 
 
 class _HooksBridge:
@@ -9,12 +11,62 @@ class _HooksBridge:
     def __init__(self, runner):
         self._runner = runner
 
-    def on_edge_fired(self, src_id: str, src_port: str, dst_id: str, dst_port: str):
-        self._runner.sigEdgeFired.emit(src_id, src_port, dst_id, dst_port)
+    def _node_label(self, nid: str) -> str:
+        try:
+            sched = getattr(self._runner, "_scheduler", None)
+            node = getattr(sched, "nodes", {}).get(nid) if sched else None
+            if node is None:
+                return f"n{nid}"
+            # Prefer type_name, then title, then class name
+            lab = None
+            if hasattr(node.__class__, "type_name") and callable(node.__class__.type_name):
+                try:
+                    lab = node.__class__.type_name()
+                except Exception:
+                    lab = None
+            if not lab and hasattr(node.__class__, "title") and callable(node.__class__.title):
+                try:
+                    lab = node.__class__.title()
+                except Exception:
+                    lab = None
+            if not lab:
+                lab = node.__class__.__name__
+            return str(lab).strip()
+        except Exception:
+            return f"n{nid}"
+
+    def on_node_start(self, nid: str):
+        # Execution trace
+        if enabled('trace'):
+            lab = self._node_label(nid)
+            print(f"[{lab}] {nid} -> exec on {thread_label()}")
+        # Special-case Delay enters wait
+        if enabled('wait'):
+            lab = self._node_label(nid)
+            if lab.lower().replace(' ', '') == 'delay':
+                print(f"[Delay] {nid} -> Wait mode")
 
     def on_node_output(self, nid: str, out: dict):
+        # User Print node: show message
+        try:
+            if enabled('print'):
+                lab = self._node_label(nid)
+                if lab.lower().replace(' ', '') == 'print':
+                    msg = out.get('printed', out.get('text', ''))
+                    print(f"[Print] {nid} -> {msg}")
+        except Exception:
+            pass
         self._runner.sigNodeOutput.emit(nid, out)
 
+    def on_node_finish(self, nid: str):
+        # Wakeup for Delay
+        if enabled('wait'):
+            lab = self._node_label(nid)
+            if lab.lower().replace(' ', '') == 'delay':
+                print(f"[Delay] {nid} -> Wakeup mode")
+
+    def on_edge_fired(self, src_id: str, src_port: str, dst_id: str, dst_port: str):
+        self._runner.sigEdgeFired.emit(src_id, src_port, dst_id, dst_port)
 
 class EngineRunner(QtCore.QObject):
     """Asynchronous engine powered by :class:`Scheduler` in the main thread."""
@@ -61,7 +113,10 @@ class EngineRunner(QtCore.QObject):
             self._scheduler.on_state_changed.connect(self.sigStateChanged)
             self._scheduler.on_active_tokens_changed.connect(self.sigActiveTokens)
             self._scheduler.on_reset_node_visuals.connect(self.sigResetNodeVisuals)
-            self._scheduler.on_node_listening_changed.connect(self.sigNodeListening)
+            self._scheduler.on_node_listening_changed.connect(lambda nid, on, hooks=hooks: print(f"[{hooks._node_label(nid)}] {nid} -> {'Wait mode' if on else 'Wakeup mode'}"))
+            # Debug wait/wakeup logs for listening nodes
+            if enabled('wait'):
+                self._scheduler.on_node_listening_changed.connect(lambda nid, on, hooks=hooks: print(f"[{hooks._node_label(nid)}] {nid} -> {'Wait mode' if on else 'Wakeup mode'}"))
             # cockpit
             self._scheduler.on_cockpit_led_set.connect(self.sigCockpitLedSet)
             self._scheduler.on_cockpit_text_set.connect(self.sigCockpitTextSet)
@@ -102,3 +157,17 @@ class EngineRunner(QtCore.QObject):
                 self._scheduler.set_cockpit_text_cache(str(id), str(text))
             except Exception:
                 pass
+
+    def on_node_finish(self, nid: str):
+        # Wakeup for Delay
+        if enabled('wait'):
+            lab = self._node_label(nid)
+            if lab.lower().replace(' ', '') == 'delay':
+                print(f"[Delay] {nid} -> Wakeup mode")
+        # nothing else here; EngineRunner also forwards finished via signals
+
+    def on_node_listening_changed(self, nid: str, on: bool):
+        # Nodes that wait for signals (CustomEvent, OnCockpitButton, Serial events)
+        if enabled('wait'):
+            lab = self._node_label(nid)
+            print(f"[{lab}] {nid} -> {'Wait mode' if on else 'Wakeup mode'}")

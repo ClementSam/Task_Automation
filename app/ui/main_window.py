@@ -16,14 +16,15 @@ from ..nodes import control as control_nodes  # noqa: F401
 from ..nodes import convert as convert_nodes  # noqa: F401
 from ..nodes import variables_runtime as variable_nodes  # noqa: F401
 from ..nodes import cockpit as cockpit_nodes  # noqa: F401
-from ..nodes.variables_runtime import _cast as cast_var
+from ..nodes.variables_runtime import cast_value as cast_var
 
 try:
     from PyQt5.QtSerialPort import QSerialPort
 except Exception:  # pragma: no cover - optional dependency
     QSerialPort = object
 
-DTYPE_MAP = {'String': str, 'Int': int, 'Float': float, 'Bool': bool, 'SerialPortRef': QSerialPort, 'ScopeRef': object}
+DTYPE_MAP = {'String': str, 'Int': int, 'Float': float, 'Bool': bool, 'SerialPortRef': QSerialPort, 'ScopeRef': object,
+             'String[]': tuple, 'Int[]': tuple, 'Float[]': tuple, 'Bool[]': tuple, 'SerialPortRef[]': tuple, 'ScopeRef[]': tuple}
 
 
 class FileLogger(QtWidgets.QPlainTextEdit):
@@ -69,7 +70,64 @@ class LegendWidget(QtWidgets.QWidget):
             sw.setStyleSheet(f"background-color: {color.name()}; border: 1px solid #222;")
             layout.addRow(sw, QtWidgets.QLabel(typ))
 
-class MainWindow(QtWidgets.QMainWindow):
+
+class _CockpitLinkingMixinMW:
+    """Provide name<->id snapshot resolution for Cockpit, frozen at RUN start."""
+
+    def _normalize_cockpit_key(self, key: str) -> str:
+        try:
+            return (str(key) or "").strip().lower()
+        except Exception:
+            return ""
+
+    def _snapshot_cockpit_index(self):
+        try:
+            name_to_id, id_to_name = self.cockpit.build_name_index()
+            self._cockpit_name_index = dict(name_to_id)
+            self._cockpit_id_to_name = dict(id_to_name)
+        except Exception:
+            self._cockpit_name_index = {}
+            self._cockpit_id_to_name = {}
+
+    def _resolve_cockpit_key_to_id(self, key: str):
+        if not key:
+            return None
+        mid = self._cockpit_name_index.get(self._normalize_cockpit_key(key))
+        if mid:
+            return mid
+        # allow passing a raw id
+        try:
+            items = dict(self.cockpit.iter_items())
+            if key in items:
+                return key
+        except Exception:
+            pass
+        return None
+
+    def _cockpit_set_led_by_key(self, key: str, on: bool, color):
+        mid = self._resolve_cockpit_key_to_id(key)
+        if mid:
+            self.cockpit.set_led(mid, on, color)
+
+    def _cockpit_apply_text_action_by_key(self, key: str, text, clear: bool, append: bool):
+        mid = self._resolve_cockpit_key_to_id(key)
+        if mid:
+            self.cockpit.apply_text_action(mid, text, clear, append)
+
+    def _on_cockpit_button_clicked(self, name: str):
+        # Forward button click using the *snapshot* canonical name
+        mid = self._resolve_cockpit_key_to_id(name)
+        if mid:
+            canonical = self._cockpit_id_to_name.get(mid) or name
+        else:
+            canonical = name
+        try:
+            self.engine_runner.cockpitButtonClicked(canonical)
+        except Exception:
+            self.engine_runner.cockpitButtonClicked(name)
+
+
+class MainWindow(QtWidgets.QMainWindow, _CockpitLinkingMixinMW):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("PyQt5 Node Editor – Starter (v6.4)")
@@ -91,7 +149,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.varsDock.setWidget(self.varsPanel)
         self.addDockWidget(QtCore.Qt.LeftDockWidgetArea, self.varsDock)
         # Cockpit dock
-        self.cockpit = CockpitWidget(self)
+        self.cockpit = CockpitWidget(None, self)
         self.cockpitDock = self.cockpit
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, self.cockpitDock)
 
@@ -140,6 +198,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # --- EngineRunner (background execution) ---
         self.engine_runner = EngineRunner(self)
+        # Snapshot of cockpit linking (frozen at RUN start)
+        self._cockpit_name_index = {}
+        self._cockpit_id_to_name = {}
         self._hooks = MainWindow.Hooks(self)
         self.actContinuous.toggled.connect(lambda on: self.engine_runner.setContinuousRun(on))
         self.engine_runner.sigNodeStarted.connect(self._hooks.on_node_start)
@@ -149,11 +210,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.engine_runner.sigStateChanged.connect(self.view.set_graph_border)
         self.engine_runner.sigResetNodeVisuals.connect(self.scene.ui_clear_all_nodes)
         self.engine_runner.sigNodeListening.connect(self.scene.set_node_listening)
-        self.engine_runner.sigRunStarted.connect(lambda: self.log.appendPlainText("--- RUN (async) ---"))
+        self.engine_runner.sigRunStarted.connect(lambda: (self._snapshot_cockpit_index(), self.log.appendPlainText("--- RUN (async) ---")))
         # Cockpit connections
-        self.engine_runner.sigCockpitLedSet.connect(self.cockpit.set_led)
-        self.engine_runner.sigCockpitTextSet.connect(self.cockpit.apply_text_action)
-        self.cockpit.buttonClicked.connect(self.engine_runner.cockpitButtonClicked)
+        self.engine_runner.sigCockpitLedSet.connect(self._cockpit_set_led_by_key)
+        self.engine_runner.sigCockpitTextSet.connect(self._cockpit_apply_text_action_by_key)
+        self.cockpit.buttonClicked.connect(self._on_cockpit_button_clicked)
         self.cockpit.textEdited.connect(self.engine_runner.setCockpitTextCache)
         self.engine_runner.sigRunFinished.connect(self._on_engine_finished)
         self.engine_runner.sigError.connect(lambda msg: self.log.appendPlainText(f"[ERREUR] {msg}"))
@@ -292,6 +353,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.log.appendPlainText(f"[ERREUR] {e}")
     
     def _on_engine_finished(self, results: dict):
+        # Clear cockpit snapshot after run
+        self._cockpit_name_index = {}
+        self._cockpit_id_to_name = {}
         if hasattr(self, "pauseAct"):
             self.pauseAct.setChecked(False)
         # Affiche les impressions 'Print' à la fin d'un run async
@@ -316,8 +380,19 @@ class MainWindow(QtWidgets.QMainWindow):
         if item.subtitle_item:
             item.subtitle_item.setText(name)
         port = item.outputs.get('value') if item.type_name == "GetVariable" else item.inputs.get('value')
+        # array awareness: base type/color and shape
+        is_array = isinstance(tname, str) and tname.endswith('[]')
+        base_tname = tname[:-2] if is_array else tname
+        base_dtype = DTYPE_MAP.get(base_tname, str)
         if port:
             port.dtype = dtype
+            # shape: square if array
+            if hasattr(port, 'is_array'):
+                port.is_array = is_array
+            # color override: keep same color as base type even if dtype is list
+            if hasattr(port, '_color_override'):
+                from .graph import TYPE_COLORS
+                port._color_override = TYPE_COLORS.get(base_dtype)
             port._update_appearance()
         if item.type_name == "GetVariable":
             ed = item.output_editors.pop('value', None)
@@ -327,7 +402,8 @@ class MainWindow(QtWidgets.QMainWindow):
             brush = QtGui.QBrush(QtGui.QColor('#AA0000'), QtCore.Qt.DiagCrossPattern)
             item._missing_var = True
         else:
-            brush = QtGui.QBrush(TYPE_COLORS.get(dtype, TYPE_COLORS[object]))
+            from .graph import TYPE_COLORS
+            brush = QtGui.QBrush(TYPE_COLORS.get(base_dtype, TYPE_COLORS[object]))
             item._missing_var = False
         item.header.setBrush(brush)
 
@@ -385,7 +461,8 @@ class MainWindow(QtWidgets.QMainWindow):
         dtype = DTYPE_MAP.get(tname, str)
         params = {'name': name, 'type': tname, '_port_types': {'value': dtype}, 'subtitle': name}
         item = self.scene.add_node("GetVariable", pos, params=params)
-        item.header.setBrush(QtGui.QBrush(TYPE_COLORS.get(dtype, TYPE_COLORS[object])))
+        # Uniform styling (color/shape) and remove inline editor
+        self._apply_variable_style(item, name, tname, dtype, error=False)
         ed = item.output_editors.pop('value', None)
         if ed:
             self.scene.removeItem(ed)
@@ -395,14 +472,13 @@ class MainWindow(QtWidgets.QMainWindow):
         dtype = DTYPE_MAP.get(tname, str)
         params = {'name': name, 'type': tname, '_port_types': {'value': dtype}, 'subtitle': name}
         item = self.scene.add_node("SetVariable", pos, params=params)
-        item.header.setBrush(QtGui.QBrush(TYPE_COLORS.get(dtype, TYPE_COLORS[object])))
-
-
+        # Uniform styling (color/shape)
+        self._apply_variable_style(item, name, tname, dtype, error=False)
 
     def _example_graph(self):
         center = self.view.mapToScene(self.view.viewport().rect().center())
         self.scene.add_node("BeginPlay", center + QtCore.QPointF(-350, -100))
-        self.scene.add_node("Add", center + QtCore.QPointF(0, 60))
+        self.scene.add_node("Add_Float", center + QtCore.QPointF(0, 60))
         self.scene.add_node("Print", center + QtCore.QPointF(320, 60))
 
 

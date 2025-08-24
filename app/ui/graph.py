@@ -173,6 +173,33 @@ class OutputEditor(QtWidgets.QGraphicsProxyWidget):
         elif isinstance(self.widget, QtWidgets.QDoubleSpinBox):
             self.node_item._params[self.param_key] = float(self.widget.value())
 
+
+class TitleEditor(QtWidgets.QGraphicsProxyWidget):
+    """Inline editor for node titles.
+
+    Unlike ``EditableTextItem`` which requires a double click to enter edit
+    mode, this editor always renders as a line edit so users immediately see
+    that the title is editable.
+    """
+
+    def __init__(self, parent: "NodeItem", text: str, on_changed):
+        super().__init__(parent)
+        self._on_changed = on_changed
+        line = QtWidgets.QLineEdit(text)
+        line.setFixedWidth(NODE_W - 16)
+        line.textChanged.connect(lambda t: self._on_changed(t))
+        self.setWidget(line)
+        self.setAcceptedMouseButtons(QtCore.Qt.AllButtons)
+        self.setFlag(QtWidgets.QGraphicsItem.ItemIsFocusable, True)
+
+    def setBrush(self, brush):  # type: ignore[override]
+        """Mimic ``QGraphicsSimpleTextItem.setBrush`` for compatibility."""
+        color = brush.color() if isinstance(brush, QtGui.QBrush) else QtGui.QColor(brush)
+        widget = self.widget()
+        pal = widget.palette()
+        pal.setColor(QtGui.QPalette.Text, color)
+        widget.setPalette(pal)
+
 class PortItem(QtWidgets.QGraphicsEllipseItem):
     def __init__(self, name: str, is_output: bool, parent_node: "NodeItem", kind: str, dtype: type = object):
         r = EXEC_PORT_RADIUS if kind == "exec" else PORT_RADIUS
@@ -183,6 +210,9 @@ class PortItem(QtWidgets.QGraphicsEllipseItem):
         self.is_output = is_output
         self.parent_node = parent_node
         self.edges: List["EdgeItem"] = []
+        # array-aware rendering
+        self.is_array: bool = False
+        self._color_override = None
         self.setFlag(QtWidgets.QGraphicsItem.ItemSendsScenePositionChanges, True)
         self.setAcceptHoverEvents(True)
         self._update_appearance()
@@ -191,7 +221,7 @@ class PortItem(QtWidgets.QGraphicsEllipseItem):
         if self.kind == "exec":
             self.setBrush(QtGui.QBrush(EXEC_COLOR))
         else:
-            color = TYPE_COLORS.get(self.dtype, TYPE_COLORS[object])
+            color = self._color_override or TYPE_COLORS.get(self.dtype, TYPE_COLORS[object])
             self.setBrush(QtGui.QBrush(color))
         self.setPen(QtGui.QPen(QtCore.Qt.black, 1))
         self.setToolTip(f'{"out" if self.is_output else "in"} {self.kind}: {self.name}')
@@ -223,6 +253,15 @@ class PortItem(QtWidgets.QGraphicsEllipseItem):
                 e.update_path()
         return super().itemChange(change, value)
 
+    def paint(self, painter, option, widget=None):
+        # Carré si sortie tableau, sinon rond
+        if self.kind == 'data' and getattr(self, 'is_array', False):
+            painter.setBrush(self.brush()); painter.setPen(self.pen())
+            r = PORT_RADIUS
+            painter.drawRect(-r, -r, 2*r, 2*r)
+        else:
+            super().paint(painter, option, widget)
+
 class EdgeItem(QtWidgets.QGraphicsPathItem):
     def __init__(self, kind: str, src_port: PortItem, dst_port: PortItem = None):
         super().__init__()
@@ -244,7 +283,7 @@ class EdgeItem(QtWidgets.QGraphicsPathItem):
         if self.kind == "exec":
             pen.setColor(EXEC_COLOR); pen.setWidth(3)
         else:
-            color = TYPE_COLORS.get(self.src_port.dtype, TYPE_COLORS[object]); pen.setColor(color)
+            color = getattr(self.src_port, '_color_override', None) or TYPE_COLORS.get(self.src_port.dtype, TYPE_COLORS[object]); pen.setColor(color)
         pen.setCapStyle(QtCore.Qt.RoundCap)
         self.setPen(pen)
 
@@ -293,6 +332,33 @@ class NodeItem(QtWidgets.QGraphicsObject):
         self.node_id = node_id
         self.type_name = type_name
         self._params = params or {}
+        # Default params for special array nodes so UI has shapes/colors from the start
+        try:
+            _special = {"ForEachLoop", "LastIndex", "Clear", "Add", "Find"}
+            if type_name in _special:
+                if not isinstance(self._params, dict):
+                    self._params = {}
+                self._params.setdefault('type', 'Int[]')
+                # per-node shapes
+                default_shapes = {
+                    'ForEachLoop': {'array': True, 'element': False, 'index': False},
+                    'LastIndex':   {'array': True, 'index': False},
+                    'Clear':       {'array': True},
+                    'Add':         {'array': True, 'item': False},
+                    'Find':        {'array': True, 'item': False, 'index': False},
+                }.get(type_name, {})
+                if '_port_shapes' not in self._params:
+                    self._params['_port_shapes'] = dict(default_shapes)
+                # per-node types (for colors); element/item dtype refined later via base type
+                base_pt = {'array': tuple}
+                if type_name == 'ForEachLoop': base_pt.update({'element': object, 'index': int})
+                if type_name == 'LastIndex':   base_pt.update({'index': int})
+                if type_name == 'Add':         base_pt.update({'item': object})
+                if type_name == 'Find':        base_pt.update({'item': object, 'index': int})
+                if '_port_types' not in self._params:
+                    self._params['_port_types'] = base_pt
+        except Exception:
+            pass
         self._active = False
         self._listening = False
 
@@ -308,13 +374,19 @@ class NodeItem(QtWidgets.QGraphicsObject):
 
         node_cls = registry.types()[type_name]
         title = node_cls.title()
+        if getattr(node_cls, 'allow_title_edit', False):
+            title = self._params.get('name', title)
 
         color_attr = getattr(node_cls, 'COLOR', None) or getattr(node_cls, 'color', None)
         if getattr(node_cls, 'event_node', False):
             self.header.setBrush(QtGui.QBrush(QtGui.QColor('#C0392B')))
         elif color_attr:
             self.header.setBrush(QtGui.QBrush(QtGui.QColor(color_attr)))
-        self.title_item = QtWidgets.QGraphicsSimpleTextItem(title, self)
+        if getattr(node_cls, 'allow_title_edit', False):
+            self._params.setdefault('name', title)
+            self.title_item = TitleEditor(self, title, self._on_title_changed)
+        else:
+            self.title_item = QtWidgets.QGraphicsSimpleTextItem(title, self)
         # optional subtitle (e.g., variable name)
         subtitle = self._params.get('subtitle') if isinstance(self._params, dict) else None
         if subtitle:
@@ -409,11 +481,64 @@ class NodeItem(QtWidgets.QGraphicsObject):
         if pt:
             for name, dtype in pt.items():
                 if name in self.outputs:
-                    self.outputs[name].dtype = dtype
-                    self.outputs[name]._update_appearance()
+                    p = self.outputs[name]
+                    p.dtype = dtype
+                    # derive shape and color from declared type string
+                    tname = self._params.get('type', 'String')
+                    is_array = isinstance(tname, str) and tname.endswith('[]')
+                    base_tname = tname[:-2] if is_array else tname
+                    BASE_DTYPE_MAP = {'String': str, 'Int': int, 'Float': float, 'Bool': bool, 'SerialPortRef': object, 'ScopeRef': object}
+                    base_dtype = BASE_DTYPE_MAP.get(base_tname, str)
+                    if hasattr(p, 'is_array'): p.is_array = is_array
+                    if hasattr(p, '_color_override'):
+                        from .graph import TYPE_COLORS
+                        p._color_override = TYPE_COLORS.get(base_dtype)
+                    p._update_appearance()
                 if name in self.inputs:
-                    self.inputs[name].dtype = dtype
-                    self.inputs[name]._update_appearance()
+                    p = self.inputs[name]
+                    p.dtype = dtype
+                    tname = self._params.get('type', 'String')
+                    is_array = isinstance(tname, str) and tname.endswith('[]')
+                    base_tname = tname[:-2] if is_array else tname
+                    BASE_DTYPE_MAP = {'String': str, 'Int': int, 'Float': float, 'Bool': bool, 'SerialPortRef': object, 'ScopeRef': object}
+                    base_dtype = BASE_DTYPE_MAP.get(base_tname, str)
+                    if hasattr(p, 'is_array'): p.is_array = is_array
+                    if hasattr(p, '_color_override'):
+                        from .graph import TYPE_COLORS
+                        p._color_override = TYPE_COLORS.get(base_dtype)
+                    p._update_appearance()
+
+
+        # Fallback: if no per-port shapes provided, mark all data ports array/scalar from 'type'
+        if not isinstance(self._params, dict) or '_port_shapes' not in self._params:
+            tname = self._params.get('type', 'String') if isinstance(self._params, dict) else 'String'
+            is_array = isinstance(tname, str) and tname.endswith('[]')
+            try:
+                for p in list(self.inputs.values()) + list(self.outputs.values()):
+                    if p.kind == 'data':
+                        p.is_array = bool(is_array)
+                        p._update_appearance()
+            except Exception:
+                pass
+
+        # Apply instance port shape overrides (array/scalar per-port)
+        shapes = self._params.get('_port_shapes') if isinstance(self._params, dict) else None
+        if shapes:
+            for name, is_arr in shapes.items():
+                if name in self.outputs:
+                    try:
+                        p = self.outputs[name]
+                        p.is_array = bool(is_arr)
+                        p._update_appearance()
+                    except Exception:
+                        pass
+                if name in self.inputs:
+                    try:
+                        p = self.inputs[name]
+                        p.is_array = bool(is_arr)
+                        p._update_appearance()
+                    except Exception:
+                        pass
 
     def params(self) -> dict:
         return dict(self._params)
@@ -452,11 +577,27 @@ class NodeItem(QtWidgets.QGraphicsObject):
                     e.update_path()
         return super().itemChange(change, value)
 
+    def _on_title_changed(self, text: str) -> None:
+        self._params['name'] = text
+
 class EditableTextItem(QtWidgets.QGraphicsTextItem):
-    def __init__(self, text, parent=None):
+    def __init__(self, text, parent=None, on_changed=None):
         super().__init__(text, parent)
         self.setDefaultTextColor(QtGui.QColor(230,230,230))
         self.setTextInteractionFlags(QtCore.Qt.NoTextInteraction)
+        self._on_changed = on_changed
+
+    # QGraphicsSimpleTextItem exposes ``setBrush`` to change its color while
+    # QGraphicsTextItem (our base class) uses ``setDefaultTextColor``.  NodeItem
+    # expects a ``setBrush`` method regardless of the concrete text item type,
+    # so provide a compatible implementation here to avoid attribute errors
+    # when editable titles are used.
+    def setBrush(self, brush):  # type: ignore[override]
+        if isinstance(brush, QtGui.QBrush):
+            color = brush.color()
+        else:
+            color = QtGui.QColor(brush)
+        self.setDefaultTextColor(color)
 
     def mouseDoubleClickEvent(self, event):
         self.setTextInteractionFlags(QtCore.Qt.TextEditorInteraction)
@@ -466,6 +607,8 @@ class EditableTextItem(QtWidgets.QGraphicsTextItem):
     def focusOutEvent(self, event):
         self.setTextInteractionFlags(QtCore.Qt.NoTextInteraction)
         super().focusOutEvent(event)
+        if self._on_changed:
+            self._on_changed(self.toPlainText())
 
 class ResizerHandle(QtWidgets.QGraphicsRectItem):
     SIZE = 10
@@ -658,6 +801,71 @@ class GraphScene(QtWidgets.QGraphicsScene):
             if e in self.edges:
                 self.edges.remove(e)
         if src.kind == "data":
+            # Special-case: array nodes accept any array type on their "array" input
+            special_nodes = {"ForEachLoop", "LastIndex", "Clear", "Add", "Find"}
+            def _is_array_input(port):
+                try:
+                    return port.name == "array" and port.parent_node.type_name in special_nodes
+                except Exception:
+                    return False
+            if _is_array_input(dst):
+                # Consider source as an array if either:
+                # - the port reports is_array, OR
+                # - dtype is tuple (array color), OR
+                # - its node has params.type ending with []
+                src_is_array = bool(getattr(src, "is_array", False)) or getattr(src, "dtype", None) is tuple
+                try:
+                    par = src.parent_node.params() if hasattr(src.parent_node, "params") else None
+                    if isinstance(par, dict) and isinstance(par.get("type"), str) and par.get("type").endswith("[]"):
+                        src_is_array = True
+                except Exception:
+                    pass
+                if src_is_array and getattr(dst, "is_array", False):
+                    # Propagate chosen type/color to destination node so its outputs match the input
+                    try:
+                        dst_node = dst.parent_node
+                        src_node = src.parent_node
+                        src_tname = None
+                        if hasattr(src_node, "params"):
+                            par = src_node.params()
+                            if isinstance(par, dict):
+                                src_tname = par.get("type", None)
+                        base_tname = None
+                        if isinstance(src_tname, str) and src_tname.endswith("[]"):
+                            base_tname = src_tname[:-2]
+                        if base_tname is None:
+                            rev = {int:"Int", float:"Float", bool:"Bool", str:"String"}
+                            base_tname = rev.get(getattr(src, "dtype", object), "Int")
+                        # Remember the type on destination node
+                        try:
+                            if not isinstance(dst_node._params, dict):
+                                dst_node._params = {}
+                            dst_node._params["type"] = f"{base_tname}[]"
+                        except Exception:
+                            pass
+                        BASE_DTYPE_MAP = {"String": str, "Int": int, "Float": float, "Bool": bool}
+                        base_dtype = BASE_DTYPE_MAP.get(base_tname, object)
+                        # ForEachLoop: color of "element" should match base type
+                        if getattr(dst_node, "type_name", "") == "ForEachLoop" and "element" in getattr(dst_node, "outputs", {}):
+                            try:
+                                dst_node.outputs["element"]._color_override = TYPE_COLORS.get(base_dtype, None)
+                                dst_node.outputs["element"]._update_appearance()
+                            except Exception:
+                                pass
+                        # For Add/Find: color of "item" input should match base type too
+                        if "item" in getattr(dst_node, "inputs", {}):
+                            try:
+                                dst_node.inputs["item"]._color_override = TYPE_COLORS.get(base_dtype, None)
+                                dst_node.inputs["item"]._update_appearance()
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    return True
+                return False
+            # Default data connection policy: shapes must match and dtypes compatible
+            if getattr(src, "is_array", False) != getattr(dst, "is_array", False):
+                return False
             return is_compatible(src.dtype, dst.dtype)
         return True
 

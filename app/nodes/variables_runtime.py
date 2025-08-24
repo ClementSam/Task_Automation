@@ -12,6 +12,34 @@ except Exception:  # pragma: no cover - optional dependency
 
 _TYPE_MAP = { 'String': str, 'Int': int, 'Float': float, 'Bool': bool }
 
+def _decompose_type(tname: str):
+    if isinstance(tname, str) and tname.endswith('[]'):
+        return tname[:-2], True
+    return tname, False
+
+def _split_items(s: str) -> list:
+    s = (s or '').strip()
+    if not s:
+        return []
+    if s.startswith('[') and s.endswith(']'):
+        s = s[1:-1]
+    return [p.strip() for p in s.split(',') if p.strip() != '']
+
+def cast_value(val, tname: str):
+    base_t, is_array = _decompose_type(tname)
+    if not is_array:
+        return _cast(val, base_t)
+    if val is None or val == '':
+        return []
+    if isinstance(val, str):
+        items = _split_items(val)
+    elif isinstance(val, (list, tuple)):
+        items = list(val)
+    else:
+        items = [val]
+    return [_cast(x, base_t) for x in items]
+
+
 def _cast(val, tname: str):
     if tname == 'ScopeRef':
         return val if val is None or isinstance(val, ScopeRef) else None
@@ -44,7 +72,7 @@ class GetVariable(BaseNode):
         if not eng: raise RuntimeError("Engine indisponible.")
         name = self._params.get("name", "")
         tname = self._params.get("type", "String")
-        return {"value": _cast(eng.vars.get(name), tname)}
+        return {"value": cast_value(eng.vars.get(name), tname)}
 
 @registry.register
 class SetVariable(BaseNode):
@@ -73,6 +101,6 @@ class SetVariable(BaseNode):
         if raw is None:  # pas de câble et pas de champ -> ne rien écrire
             return (["then"], {})
 
-        val = _cast(raw, tname)
+        val = cast_value(raw, tname)
         eng.vars[name] = val
         return (["then"], {})

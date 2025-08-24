@@ -11,7 +11,7 @@ from app.nodes import math as _math_nodes  # noqa: F401
 def test_save_and_load_graph(tmp_path: Path):
     nodes = [
         NodeSpec(id="n1", type_name="BeginPlay"),
-        NodeSpec(id="n2", type_name="Add", params={
+        NodeSpec(id="n2", type_name="Add_Float", params={
             DEFAULT_PREFIX + "a": 1,
             DEFAULT_PREFIX + "b": 2,
         }),
@@ -33,6 +33,11 @@ def test_save_and_load_graph(tmp_path: Path):
         "comments": [
             {"rect": [0, 0, 100, 50], "color": "#FFFFFF", "text": "note"}
         ],
+        "cockpit": {
+            "elements": [
+                {"type": "label", "id": "lbl:1", "pos": [0, 0], "props": {"text": "hello"}}
+            ]
+        },
     }
 
     path = tmp_path / "graph.json"
