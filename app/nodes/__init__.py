@@ -1,5 +1,5 @@
 
-from . import base, control, convert, math, text, custom_events
+from . import base, control, convert, math, text, custom_events, arrays
 # optional: serial node
 try:
     from . import serial  # noqa: F401

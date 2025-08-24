@@ -9,6 +9,13 @@ from .engine import DEFAULT_PREFIX, NodeSpec, EdgeSpec
 from .registry import registry
 
 
+def _norm_debug_key(s) -> str:
+    try:
+        return (str(s) if s is not None else '').strip().casefold()
+    except Exception:
+        return ''
+
+
 @dataclass
 class Token:
     id: int
@@ -35,6 +42,11 @@ class Scheduler(QtCore.QObject):
 
     def __init__(self, parent=None, hooks: Optional[object] = None):
         super().__init__(parent)
+        # Auto-wire cockpit button to custom events
+        try:
+            self.on_cockpit_button_clicked.connect(self.trigger_custom_event)
+        except Exception as e:
+            print(f"[debug] failed to connect cockpit signal -> custom event: {e}")
         self.hooks = hooks
         self._continuous_run: bool = False
         self._active_tokens: int = 0
@@ -200,13 +212,20 @@ class Scheduler(QtCore.QObject):
         self.on_node_listening_changed.emit(nid, bool(on))
 
     def trigger_custom_event(self, name: str) -> None:
-        """Spawn tokens for all CustomEvent nodes matching ``name``."""
+        """Spawn tokens for all CustomEvent nodes matching ``name`` (case/space-insensitive)."""
+        key = _norm_debug_key(name)
         for nid, node in self.nodes.items():
-            if getattr(node, "is_custom_event", False):
-                params = node.params()
-                if params.get("name") == name:
+            if getattr(node, 'is_custom_event', False):
+                try:
+                    params = node.params()
+                except Exception:
+                    params = getattr(node, '_params', {}) or {}
+                ev_raw = params.get('name')
+                ev_key = _norm_debug_key(ev_raw)
+                if ev_key and ev_key == key:
                     tid = self._new_token(nid, {})
                     self.post_ready(tid)
+
 
     # ---- token helpers -------------------------------------------------
     def _new_token(self, nid: str, data: Optional[Dict[str, Any]] = None, *, gid: int | None = None) -> int:
@@ -230,6 +249,13 @@ class Scheduler(QtCore.QObject):
 
     # ---- running -------------------------------------------------------
     def start_run(self):
+        # Mark custom event nodes as listening for UI feedback
+        try:
+            for nid, inst in self.nodes.items():
+                if getattr(inst, 'is_custom_event', False):
+                    self.ui_node_set_listening(nid, True)
+        except Exception:
+            pass
         # entry nodes have no exec inputs
         entry_nodes = [nid for nid in self._exec_nodes if not self.nodes[nid].exec_inputs()]
         for nid in entry_nodes:
