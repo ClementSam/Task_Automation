@@ -56,3 +56,28 @@ def test_cockpit_delete_selected():
     if created:
         app.quit()
 
+
+def test_cockpit_title_edit_allows_deletion():
+    app, created = _setup_qt()
+    from app.ui.cockpit import CockpitWidget
+    from PyQt5 import QtCore, QtGui
+
+    c = CockpitWidget()
+    c.add_button("btn:1")
+    proxy = c._items["btn:1"]
+    container = proxy.widget()
+    title_edit = container.bar.lbl
+
+    title_edit.setText("abc")
+    title_edit.setFocus()
+
+    # send a backspace key event through the view; the title should update
+    event = QtGui.QKeyEvent(QtCore.QEvent.KeyPress, QtCore.Qt.Key_Backspace, QtCore.Qt.NoModifier)
+    QtWidgets.QApplication.sendEvent(c.view, event)
+
+    assert title_edit.text() == "ab"
+    assert "btn:1" in c._items
+
+    if created:
+        app.quit()
+
